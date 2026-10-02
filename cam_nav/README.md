@@ -7,12 +7,29 @@ Tested with an Xbox controller on Windows, TouchDesigner 2025.32820.
 
 ## Install
 
-1. Copy [`scripts/`](scripts/) to `<your project folder>/scripts/cam_nav/`. The three script DATs inside the
-   component sync to those relative paths.
-2. Drag [`cam_nav.tox`](cam_nav.tox) into your network.
-3. Set your Render TOP's **Camera** parameter to `cam_nav/cam` (adjust the path to wherever you placed it).
-4. **Click the TouchDesigner window** and move a stick. TouchDesigner only reads the controller while its window
+Two exports of the same component are provided:
+
+| File | Scripts | Use it when |
+| --- | --- | --- |
+| [`cam_nav_standalone.tox`](cam_nav_standalone.tox) | Embedded in the tox, no other files needed | You just want to drop it in and go |
+| [`cam_nav.tox`](cam_nav.tox) | Synced to `scripts/cam_nav/` next to your project | You want to edit the scripts in an external editor with live reload |
+
+**Standalone (simplest)**
+
+1. Drag [`cam_nav_standalone.tox`](cam_nav_standalone.tox) into your network.
+2. Set your Render TOP's **Camera** parameter to `cam_nav/cam` (adjust the path to wherever you placed it).
+3. **Click the TouchDesigner window** and move a stick. TouchDesigner only reads the controller while its window
    has focus.
+
+**With external scripts**
+
+1. Copy [`scripts/`](scripts/) to `<your project folder>/scripts/cam_nav/`. The three script DATs inside
+   `cam_nav.tox` sync to those relative paths.
+2. Drag [`cam_nav.tox`](cam_nav.tox) into your network, then follow steps 2 and 3 above.
+
+The standalone tox was checked by loading it into a fresh COMP: same children, same 18 parameters and defaults, same
+`map`, all three script DATs have no file link (`file` empty, sync off), and a simulated forward push moved the rig as
+expected.
 
 ## Controls
 
@@ -87,4 +104,5 @@ inputs and update `map`.
 - The Null COMP `rig` contains a default `primitivePOP` child (TouchDesigner's default for new Null COMPs). It is
   not rendered unless a Render TOP's Geometry parameter includes it.
 - A newly created Camera COMP starts at tz=5; `cam` is set to 0 here so the rig position is the camera position.
-- Edit the scripts in `scripts/`, not inside the DATs. They are file-synced and reload on save.
+- With `cam_nav.tox`, edit the scripts in `scripts/`, not inside the DATs. They are file-synced and reload on save.
+- With `cam_nav_standalone.tox`, the scripts live inside the DATs. Edit them there; they are not linked to the files in `scripts/`.
