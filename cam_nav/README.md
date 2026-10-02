@@ -33,7 +33,7 @@ The sticks are swapped relative to the usual "left stick moves" convention: **ri
 | --- | --- | --- |
 | Active | on | Master enable |
 | Speed | 2 | Movement speed, units per second |
-| Turn Speed | 60 | Turning speed, degrees per second |
+| Turn Speed | 10 | Turning speed, degrees per second |
 | Boost Mult | 4 | Speed factor at full boost |
 | Slow Mult | 0.25 | Speed factor at full slow |
 | Dead Zone | 0.15 | Radial stick dead zone (shared by both sticks) |
