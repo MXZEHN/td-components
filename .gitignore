@@ -1,0 +1,7 @@
+# TouchDesigner autosaves, backups and caches
+*.toe
+Backup/
+CrashAutoSave*
+.claude/
+__pycache__/
+*.pyc
