@@ -28,7 +28,11 @@ pushes the hierarchy levels further apart in Z.
 
 Live mode polls the network every few frames and updates in place: new
 operators grow in over Birth Time, and the internal camera follows the
-newest (or last moved) operator.
+newest (or last moved) operator. When the network editor enters or leaves a
+component, the camera dives through the COMP's tile into its network (or
+back out through it) while Focus Level fades the layers: parents in front
+almost vanish, children behind stay faint. Dive(path) does the same from a
+script.
 """
 
 import math
@@ -138,6 +142,10 @@ class NetGraphExt:
         self._camLook = None
         self._now = 0.0
         self._lastTick = None
+        self.Networks = {}   # COMP path -> its network's level, depth and bounds
+        self._ownerPath = None   # network the editor (or Dive) is showing
+        self._chain = set()      # that network and its ancestors: always scanned
+        self._trans = None       # running dive / surface transition
 
     # ---- helpers ---------------------------------------------------
 
@@ -191,6 +199,7 @@ class NetGraphExt:
         self.MaxRank = 0
         self._index = {}
         self._ops = []
+        self.Networks = {}
         self._cols = self.Colors()
         self._tile = self.Tile()
         self._scale = p.Scale.eval()
@@ -202,6 +211,7 @@ class NetGraphExt:
             debug('net3d: Target is not a COMP')
             return
         self._scanNetwork(target, 0, None, 0)
+        self._targetPath = target.path
         if p.References.eval():
             self._linkReferences()
 
@@ -230,6 +240,13 @@ class NetGraphExt:
         def world(nx, ny):
             return ox + nx * s, oy + ny * s
 
+        bx0, by0 = world(x0, y0)
+        bx1, by1 = world(x1, y1)
+        self.Networks[comp.path] = {
+            'level': level, 'z': oz, 'x': (bx0 + bx1) * 0.5, 'y': (by0 + by1) * 0.5,
+            'w': bx1 - bx0, 'h': by1 - by0, 'comp': parentNode,
+            # the network holding the COMP node
+            'parent': self.Nodes[parentNode]['path'].rsplit('/', 1)[0] if parentNode is not None else None}
         fx0, fy0 = world(x0 - FRAME_PAD, y0 - FRAME_PAD)
         fx1, fy1 = world(x1 + FRAME_PAD, y1 + FRAME_PAD)
         cols = self._cols
@@ -342,14 +359,15 @@ class NetGraphExt:
 
         self._rank(first, len(self.Nodes))
 
-        if level < self._maxLevel:
-            for o in ops:
-                if o.isCOMP:
-                    ni = local[o.path]
-                    before = len(self.Nodes)
-                    self._scanNetwork(o, level + 1, ni, self.Nodes[ni]['rank'] + 1)
-                    if len(self.Nodes) > before:
-                        self._linkInOut(o, ni)
+        for o in ops:
+            # every COMP down to Recurse Depth, and deeper only along the
+            # chain down to the network being edited
+            if o.isCOMP and (level < self._maxLevel or o.path in self._chain):
+                ni = local[o.path]
+                before = len(self.Nodes)
+                self._scanNetwork(o, level + 1, ni, self.Nodes[ni]['rank'] + 1)
+                if len(self.Nodes) > before:
+                    self._linkInOut(o, ni)
 
     def _linkInOut(self, comp, ni):
         """Wires through the hierarchy, drawn like any other wire: COMP
@@ -488,16 +506,27 @@ class NetGraphExt:
         interval = int(p.Livepoll.eval()) if live else 30
         if (live or p.Autorebuild.eval()) and absTime.frame % max(1, interval) == 0:
             self.Update()
+        if live and p.Followeditor.eval():
+            owner = self._editorOwner()
+            if owner is not None and owner != self._ownerPath:
+                self.Dive(owner)
+        if self._trans is not None:
+            self._stepTransition()
         if live:
             # keep cooking while operators are still growing in
             birth = p.Birthtime.eval()
             if any(now - b < birth for b in self._born.values()):
                 self._cook()
-            if p.Follow.eval():
+            if p.Follow.eval() and self._trans is None:
                 self._follow(dt)
 
     def Frame(self):
-        """Point the internal camera at the whole network."""
+        """Point the internal camera at the network being edited, or at
+        everything when no component has been entered."""
+        if self._ownerPath in self.Networks and self._ownerPath != getattr(self, '_targetPath', None):
+            self._setCam(*self._framePose(self._ownerPath))
+            self._camPos = None
+            return
         cam = self.ownerComp.op('cam')
         items = self.Nodes + self.Panels
         if cam is None or not items:
@@ -520,6 +549,152 @@ class NetGraphExt:
         """Make the live camera fly to the operator at path."""
         self._focus = path
 
+    # ---- diving in and out of components ---------------------------
+
+    def _editorOwner(self):
+        """Path of the COMP the network editor is showing: the current
+        pane if it is a network editor, else the first network editor."""
+        try:
+            panes = [pn for pn in ui.panes if pn.type == PaneType.NETWORKEDITOR]
+            cur = ui.panes.current
+        except Exception:
+            return None
+        pane = next((pn for pn in panes if pn.id == getattr(cur, 'id', None)), None)
+        pane = pane or (panes[0] if panes else None)
+        owner = getattr(pane, 'owner', None) if pane is not None else None
+        return owner.path if owner is not None else None
+
+    def Dive(self, path, duration=None):
+        """Animate the camera to the network of the COMP at path: into
+        components through their tile, out of them back through it, via
+        the common parent for jumps across the tree. Live mode calls this
+        whenever the network editor enters or leaves a component; call it
+        yourself to script a fly-through."""
+        old = self._ownerPath
+        self._ownerPath = path
+        target = getattr(self, '_targetPath', None)
+        if target is None or not (path == target or path.startswith(target + '/')):
+            return
+        # scan the chain down to it, even below Recurse Depth, and keep the
+        # one we come from until the camera has left it
+        self._chain = self._chainOf(path) | (self._chainOf(old) if old else set())
+        if path not in self.Networks:
+            self.Update(force=True)
+        if path not in self.Networks:
+            return   # empty network: nothing to fly to
+        cam = self.ownerComp.op('cam')
+        start = ((cam.par.tx.eval(), cam.par.ty.eval(), cam.par.tz.eval()), self._camLookNow())
+        hops = self._hops(old, path) if old in self.Networks else [(None, path)]
+        dur = self.ownerComp.par.Transitiontime.eval() if duration is None else duration
+        if dur <= 0 or old is None:
+            pos, look = self._framePose(path)
+            self._setCam(pos, look)
+            self._setFocusLevel(self.Networks[path]['level'])
+            return
+        # a jump across several levels takes longer, but not hops x longer
+        dur = dur * (1.0 + 0.5 * (len(hops) - 1)) / len(hops)
+        self._trans = {'hops': hops, 'start': absTime.seconds, 'dur': dur, 'from': start,
+                       'level0': self.ownerComp.par.Focuslevel.eval()}
+        self._focus = None
+
+    @staticmethod
+    def _chainOf(path):
+        """A COMP path and all its ancestors."""
+        return {path[:i] for i in range(1, len(path) + 1) if path[i:i + 1] in ('/', '')}
+
+    def _hops(self, a, b):
+        """Networks visited from a to b: up to the common parent, then down."""
+        def chain(p_):
+            out = [p_]
+            while self.Networks.get(out[-1], {}).get('parent'):
+                out.append(self.Networks[out[-1]]['parent'])
+            return out
+        up, down = chain(a), chain(b)
+        common = next(x for x in up if x in down)
+        path = up[:up.index(common) + 1] + list(reversed(down[:down.index(common)]))
+        return list(zip(path[:-1], path[1:]))
+
+    def _netZ(self, net):
+        n = self.Networks[net]
+        return n['z'] - self.ownerComp.par.Explode.eval() * n['level']
+
+    def _framePose(self, net):
+        """Camera pose that shows a whole network. Inside a component the
+        camera stays behind the layer in front, so it is really 'in' it."""
+        n = self.Networks[net]
+        cam = self.ownerComp.op('cam')
+        res = self.ownerComp.op('render')
+        aspect = res.width / max(1, res.height)
+        tanh = math.tan(math.radians(cam.par.fov.eval()) * 0.5)
+        dist = max(n['h'] * 0.5, n['w'] * 0.5 / aspect) * 1.15 / tanh
+        if n['level'] > 0:
+            dist = min(dist, (self.ownerComp.par.Layerspacing.eval() + self.ownerComp.par.Explode.eval()) * 0.85)
+        z = self._netZ(net)
+        return (n['x'], n['y'], z + dist), (n['x'], n['y'], z)
+
+    def _doorPose(self, net):
+        """Camera pose right in front of the COMP tile of a network: the
+        tile fills the view, the moment the editor would 'enter' it."""
+        n = self.Nodes[self.Networks[net]['comp']]
+        cam = self.ownerComp.op('cam')
+        tanh = math.tan(math.radians(cam.par.fov.eval()) * 0.5)
+        z = self._netZ(self.Networks[net]['parent'])
+        return (n['x'], n['y'], z + n['h'] * 0.5 / tanh * 1.1), (n['x'], n['y'], z)
+
+    def _stepTransition(self):
+        tr = self._trans
+        t = (absTime.seconds - tr['start']) / tr['dur']
+        k = int(t)
+        if k >= len(tr['hops']):
+            pos, look = self._framePose(tr['hops'][-1][1])
+            self._setCam(pos, look)
+            self._setFocusLevel(self.Networks[tr['hops'][-1][1]]['level'])
+            self._trans = None
+            self._camPos = None   # follow picks up from here
+            self._chain = self._chainOf(self._ownerPath)
+            return
+        u = _smooth(t - k)
+        a, b = tr['hops'][k]
+        pa = tr['from'] if k == 0 else self._framePose(a)
+        pb = self._framePose(b)
+        # into a child goes through its tile, out of one too
+        door = None
+        if a is not None and self.Networks[b].get('parent') == a:
+            door = self._doorPose(b)
+        elif a is not None and self.Networks[a].get('parent') == b:
+            door = self._doorPose(a)
+        if door is None:
+            pos = tuple(x + (y - x) * u for x, y in zip(pa[0], pb[0]))
+            look = tuple(x + (y - x) * u for x, y in zip(pa[1], pb[1]))
+        else:
+            q = lambda p0, p1, p2: tuple((1 - u) ** 2 * x + 2 * (1 - u) * u * y + u * u * w
+                                         for x, y, w in zip(p0, p1, p2))
+            pos, look = q(pa[0], door[0], pb[0]), q(pa[1], door[1], pb[1])
+        la = tr['level0'] if k == 0 else self.Networks[a]['level']
+        self._setCam(pos, look)
+        self._setFocusLevel(la + (self.Networks[b]['level'] - la) * u)
+
+    def _camLookNow(self):
+        """Point the camera is looking at, from its position and rotation."""
+        cam = self.ownerComp.op('cam')
+        rx, ry = math.radians(cam.par.rx.eval()), math.radians(cam.par.ry.eval())
+        d = (-math.sin(ry) * math.cos(rx), math.sin(rx), -math.cos(ry) * math.cos(rx))
+        pos = (cam.par.tx.eval(), cam.par.ty.eval(), cam.par.tz.eval())
+        return tuple(p_ + d_ * 5.0 for p_, d_ in zip(pos, d))
+
+    def _setCam(self, pos, look):
+        cam = self.ownerComp.op('cam')
+        dx, dy, dz = (look[0] - pos[0], look[1] - pos[1], look[2] - pos[2])
+        cam.par.tx, cam.par.ty, cam.par.tz = pos
+        # camera looks down -Z; rotate order XYZ = pitch, then yaw
+        cam.par.ry = math.degrees(math.atan2(-dx, -dz))
+        cam.par.rx = math.degrees(math.atan2(dy, math.hypot(dx, dz)))
+        cam.par.rz = 0
+
+    def _setFocusLevel(self, v):
+        if abs(self.ownerComp.par.Focuslevel.eval() - v) > 1e-6:
+            self.ownerComp.par.Focuslevel = v
+
     # ---- camera follow ---------------------------------------------
 
     def _follow(self, dt):
@@ -539,21 +714,18 @@ class NetGraphExt:
         k = 1.0 - math.exp(-dt / max(1e-3, p.Followsmooth.eval()))
         self._camPos = tuple(c + (w - c) * k for c, w in zip(self._camPos, want))
         self._camLook = tuple(c + (w - c) * k for c, w in zip(self._camLook, look))
-        cx, cy, cz = self._camPos
-        dx, dy, dz = (self._camLook[0] - cx, self._camLook[1] - cy, self._camLook[2] - cz)
-        cam.par.tx, cam.par.ty, cam.par.tz = cx, cy, cz
-        # camera looks down -Z; rotate order XYZ = pitch, then yaw
-        cam.par.ry = math.degrees(math.atan2(-dx, -dz))
-        cam.par.rx = math.degrees(math.atan2(dy, math.hypot(dx, dz)))
-        cam.par.rz = 0
+        self._setCam(self._camPos, self._camLook)
 
     # ---- animation -------------------------------------------------
 
     def LayerAlpha(self, level):
-        """Opacity of a hierarchy level: Layer Opacity per level away from
-        Focus Level, so the layer in focus is solid and the others fade."""
+        """Opacity of a hierarchy level: the level in focus is solid,
+        each level behind it multiplies by Layer Opacity, each level in
+        front of it (the parents, when you are inside a component) by
+        Front Opacity."""
         p = self.ownerComp.par
-        return p.Layeropacity.eval() ** abs(level - p.Focuslevel.eval())
+        d = level - p.Focuslevel.eval()
+        return p.Layeropacity.eval() ** d if d >= 0 else p.Frontopacity.eval() ** -d
 
     def Layout(self):
         """Current animated pose per node: list of (x, y, z, s) where s is

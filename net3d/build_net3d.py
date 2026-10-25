@@ -107,7 +107,7 @@ def _customPars(comp):
     p = page.appendFloat('Depth', label='Node Depth')[0]; p.default = p.val = 0.12; p.normMax = 1
     p = page.appendFloat('Wirewidth', label='Wire Width')[0]; p.default = p.val = 0.035; p.normMax = 0.2
     p = page.appendInt('Wiresegs', label='Wire Segments')[0]; p.default = p.val = 32; p.normMax = 64
-    p = page.appendFloat('Layerspacing', label='Layer Spacing')[0]; p.default = p.val = 4; p.normMax = 20
+    p = page.appendFloat('Layerspacing', label='Layer Spacing')[0]; p.default = p.val = 8; p.normMax = 20
     p = page.appendToggle('Hierlinks', label='Hierarchy Wires')[0]; p.default = p.val = True
     p = page.appendToggle('References', label='Reference Wires')[0]; p.default = p.val = True
     p = page.appendToggle('Framelinks', label='Frame Guides')[0]; p.default = p.val = False
@@ -123,6 +123,7 @@ def _customPars(comp):
     p = page.appendFloat('Reveal', label='Reveal')[0]; p.default = p.val = 1; p.clampMin = p.clampMax = True
     p = page.appendFloat('Explode', label='Explode')[0]; p.default = p.val = 0; p.normMax = 5
     p = page.appendFloat('Layeropacity', label='Layer Opacity')[0]; p.default = p.val = 0.35; p.clampMin = p.clampMax = True
+    p = page.appendFloat('Frontopacity', label='Front Opacity')[0]; p.default = p.val = 0.08; p.clampMin = p.clampMax = True
     p = page.appendFloat('Focuslevel', label='Focus Level')[0]; p.default = p.val = 0; p.normMax = 4
 
     page = comp.appendCustomPage('Live')
@@ -134,6 +135,8 @@ def _customPars(comp):
     for par_, v in zip(p, (0.6, -0.4, 3.0)):
         par_.default = par_.val = v
     p = page.appendFloat('Followsmooth', label='Follow Smooth')[0]; p.default = p.val = 0.5; p.normMax = 3
+    p = page.appendToggle('Followeditor', label='Follow Editor')[0]; p.default = p.val = True
+    p = page.appendFloat('Transitiontime', label='Dive Time')[0]; p.default = p.val = 1.2; p.normMax = 4
 
     page = comp.appendCustomPage('Render')
     page.appendCOMP('Camera', label='Camera')

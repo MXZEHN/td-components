@@ -52,7 +52,7 @@ depth.
 | Scale | 0.01 | World units per network-editor unit (a default node is about 1.3 x 0.9) |
 | Node Depth | 0.12 | Thickness of the node slabs |
 | Wire Width / Segments | 0.035 / 32 | Wire ribbon width and smoothness |
-| Layer Spacing | 4 | Z distance from a COMP node back to its network |
+| Layer Spacing | 8 | Z distance from a COMP node back to its network. Inside a component the camera stays within this gap, so larger values show more of the network |
 | Hierarchy Wires | on | Wires through the hierarchy: COMP input -> In OP, Out OP -> COMP output |
 | Reference Wires | on | Wires for operator references (a Select TOP's TOP, a Geometry COMP's material, ...), on any level |
 | Frame Guides | off | Thin dashed lines from a COMP tile's corners to its network's frame |
@@ -67,8 +67,9 @@ depth.
 | --- | --- | --- |
 | Reveal | 1 | 0..1. Nodes grow in by rank (longest path from a source), wires grow from output to input |
 | Explode | 0 | Pushes the hierarchy levels further apart: `Explode x level` extra in Z |
-| Layer Opacity | 0.35 | Opacity per hierarchy level away from Focus Level (`0.35^distance`) |
-| Focus Level | 0 | Hierarchy level drawn solid; animate it to dive from a COMP into its network |
+| Layer Opacity | 0.35 | Opacity per level *behind* Focus Level (`0.35^distance`) |
+| Front Opacity | 0.08 | Opacity per level *in front of* Focus Level, i.e. the parents when you are inside a component |
+| Focus Level | 0 | Hierarchy level drawn solid. Live mode animates it while diving; you can also animate it yourself |
 
 **Live**
 
@@ -80,10 +81,33 @@ depth.
 | Camera Follows | on | The internal `cam` flies to the newest operator, or the one you last moved |
 | Follow Offset | 0.6, -0.4, 3 | Camera position relative to that operator; it keeps looking at the operator |
 | Follow Smooth | 0.5 | Camera smoothing time in seconds |
+| Follow Editor | on | Dive into or out of components when the network editor enters or leaves them |
+| Dive Time | 1.2 | Seconds per dive; a jump across several levels adds half a Dive Time per extra level |
 
 In Live mode, a change only touches the tiles of operators that were added, removed or restyled. Moving an operator
 just moves its tile. `op('net3d').Focus('/project1/noise1')` sends the camera to a specific operator. Camera
 follow drives the internal `cam` only, so leave the Render page's Camera empty to use it.
+
+### Diving in and out of components
+
+With Live and Follow Editor on, net3d watches which component the network editor shows (the current pane if
+it's a network editor, otherwise the first one). When that changes, the camera animates there.
+
+- **Entering a component:** the camera dollies straight into the COMP's tile. The tile fills the view at the
+  moment you "go in". The camera then carries on through it and settles inside the component: behind the parent
+  layer, framing the component's network. Focus Level moves from the parent's level to the child's at the same
+  time, so the parent fades to Front Opacity and the child becomes solid.
+- **Leaving a component:** the reverse. The camera pulls back out through the COMP's tile and the parent comes
+  back.
+- **Jumping across the tree** (path bar, a sibling, several levels at once): the camera goes up to the common
+  parent and back down, one hop per level, through each COMP's tile on the way.
+- **Below Recurse Depth:** the network you're editing is always built, even deeper than Recurse Depth. Only the
+  chain of components leading to it is added, not their siblings. The chain you're leaving stays built until the
+  camera is out of it.
+- **After arriving:** the camera follows new operators again (Camera Follows).
+
+Call `op('net3d').Dive('/project1/fx')` to run the same move from a script, for a scripted fly-through.
+`Dive(path, duration)` overrides Dive Time. Frame All frames the component you're in.
 
 **Render**: `Camera` (empty uses the internal `cam`), `Frame All` (points `cam` at the whole network), `Resolution`.
 
