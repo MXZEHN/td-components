@@ -17,6 +17,7 @@ SCRIPTS = {
     'inst_cb': 'inst_cb.py',
     'notes_cb': 'notes_cb.py',
     'conn_cb': 'conn_cb.py',
+    'flags_cb': 'flags_cb.py',
     'wires_cb': 'wires_cb.py',
     'quad_cb': 'quad_cb.py',
     'frame_exec': 'frame_exec.py',
@@ -39,6 +40,20 @@ COLORS = [
     ('type', 0.60, 0.60, 0.60),
     ('frame', 0.25, 0.25, 0.25),
     ('hier', 0.80, 0.80, 0.80),
+    ('strip', 0.16, 0.16, 0.16),
+    ('current', 0.95, 0.80, 0.30),
+    ('selected', 0.85, 0.85, 0.85),
+    ('flag_bypass', 0.90, 0.75, 0.20),
+    ('flag_lock', 0.85, 0.30, 0.30),
+    ('flag_display', 0.30, 0.60, 0.95),
+    ('flag_render', 0.70, 0.40, 0.90),
+    ('flag_viewer', 0.85, 0.85, 0.85),
+]
+
+# network-editor units, see DEFAULT_TILE in NetGraphExt
+TILE = [
+    ('border', 3), ('namestrip', 18), ('namesize', 11), ('typesize', 16),
+    ('titlesize', 16), ('flagw', 7), ('flagh', 12), ('conn', 8),
 ]
 
 
@@ -88,17 +103,17 @@ def _customPars(comp):
     p = page.appendInt('Recurse', label='Recurse Depth')[0]; p.default = 0; p.normMax = 4; p.clampMin = True
     p = page.appendFloat('Scale', label='Scale')[0]; p.default = p.val = 0.01; p.normMax = 0.05
     p = page.appendFloat('Depth', label='Node Depth')[0]; p.default = p.val = 0.12; p.normMax = 1
-    p = page.appendFloat('Border', label='Border')[0]; p.default = p.val = 0.04; p.normMax = 0.2
-    p = page.appendFloat('Connsize', label='Connector Size')[0]; p.default = p.val = 0.08; p.normMax = 0.3
     p = page.appendFloat('Wirewidth', label='Wire Width')[0]; p.default = p.val = 0.035; p.normMax = 0.2
     p = page.appendInt('Wiresegs', label='Wire Segments')[0]; p.default = p.val = 32; p.normMax = 64
     p = page.appendFloat('Networkgap', label='Network Gap')[0]; p.default = p.val = 2; p.normMax = 10
     p = page.appendToggle('Hierlinks', label='Hierarchy Links')[0]; p.default = p.val = True
     p = page.appendMenu('Previews', label='TOP Previews')[0]
-    p.menuNames = ['viewer', 'all', 'none']
-    p.menuLabels = ['Viewer Flag', 'All TOPs', 'None']
-    p.default = p.val = 'viewer'
-    p = page.appendFloat('Labelres', label='Label Resolution')[0]; p.default = p.val = 2; p.normMin = 0.5; p.normMax = 4
+    p.menuNames = ['all', 'tops', 'viewer', 'none']
+    p.menuLabels = ['All Operators', 'TOPs Only', 'Viewer Active Only', 'None (Type Labels)']
+    p.default = p.val = 'all'
+    p = page.appendFloat('Viewerres', label='Viewer Resolution')[0]; p.default = p.val = 2; p.normMin = 0.5; p.normMax = 4
+    p = page.appendFloat('Labelres', label='Label Resolution')[0]; p.default = p.val = 3; p.normMin = 0.5; p.normMax = 6
+    p = page.appendToggle('Highlight', label='Highlight Current')[0]; p.default = p.val = True
 
     page = comp.appendCustomPage('Animate')
     p = page.appendFloat('Reveal', label='Reveal')[0]; p.default = p.val = 1; p.clampMin = p.clampMax = True
@@ -153,6 +168,12 @@ def build(parentComp, scriptsDir, name='net3d'):
     for row in COLORS:
         colors.appendRow(list(row))
     colors.nodeX, colors.nodeY = -600, 400
+    tile = comp.create(tableDAT, 'tile')
+    tile.clear()
+    tile.appendRow(['key', 'value'])
+    for row in TILE:
+        tile.appendRow(list(row))
+    tile.nodeX, tile.nodeY = -600, 100
     nodes = comp.create(tableDAT, 'nodes')
     nodes.nodeX, nodes.nodeY = -600, 250
 
@@ -160,6 +181,7 @@ def build(parentComp, scriptsDir, name='net3d'):
     inst = _scriptOp(comp, scriptCHOP, 'inst', 'inst_cb', -400, 400)
     notes = _scriptOp(comp, scriptCHOP, 'notes', 'notes_cb', -400, 250)
     conn = _scriptOp(comp, scriptCHOP, 'conn', 'conn_cb', -400, 100)
+    flags = _scriptOp(comp, scriptCHOP, 'flags', 'flags_cb', -400, 550)
     wires = _scriptOp(comp, scriptSOP, 'wires', 'wires_cb', -400, -50)
     quad = _scriptOp(comp, scriptSOP, 'quad', 'quad_cb', -400, -200)
     box = comp.create(boxSOP, 'box')
@@ -172,6 +194,7 @@ def build(parentComp, scriptsDir, name='net3d'):
     # geometry
     _instancedGeo(comp, 'geo_slabs', box, inst, mat, 0, 400)
     _instancedGeo(comp, 'geo_conn', box, conn, mat, 0, 250)
+    _instancedGeo(comp, 'geo_flags', box, flags, mat, 0, 550)
     gw = comp.create(geometryCOMP, 'geo_wires')
     _clearChildren(gw)
     sel = gw.create(selectSOP, 'in')
@@ -188,7 +211,7 @@ def build(parentComp, scriptsDir, name='net3d'):
 
     render = comp.create(renderTOP, 'render')
     render.par.camera.expr = "parent().par.Camera.eval() or op('cam')"
-    render.par.geometry = 'geo_slabs geo_conn geo_wires cards'
+    render.par.geometry = 'geo_slabs geo_conn geo_flags geo_wires cards'
     render.par.lights = ''
     render.par.outputresolution = 'custom'
     render.par.resolutionw.expr = 'parent().par.Res1'

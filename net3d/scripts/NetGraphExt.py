@@ -17,8 +17,11 @@ Rendering is data-driven so it can be animated:
   conn      Script CHOP, one sample per connector -> instanced connector tabs
   notes     Script CHOP, one sample per panel (frames, annotations)
   wires     Script SOP, bezier ribbons between connectors
-  cards/    one Geometry COMP per node and panel with a Text TOP face (and the
-            node's own image when it is a TOP with a preview)
+  flags     Script CHOP, one sample per lit flag -> instanced flag tabs
+  cards/    one Geometry COMP per node: a live viewer quad (the TOP's image,
+            or an OP Viewer TOP showing any operator's viewer) above a name
+            strip, inside the family-coloured slab; one per panel too
+Tile proportions come from the 'tile' table, colours from 'colors'.
 Reveal (0..1) grows the network from its sources to its outputs, Explode
 pushes each node back in Z by its rank (longest path from a source).
 
@@ -46,7 +49,33 @@ DEFAULT_COLORS = {
     'annotate': (0.30, 0.30, 0.30),
     'frame':    (0.25, 0.25, 0.25),
     'hier':     (0.80, 0.80, 0.80),
+    'strip':    (0.16, 0.16, 0.16),
+    'current':  (0.95, 0.80, 0.30),
+    'selected': (0.85, 0.85, 0.85),
+    'flag_bypass':  (0.90, 0.75, 0.20),
+    'flag_lock':    (0.85, 0.30, 0.30),
+    'flag_display': (0.30, 0.60, 0.95),
+    'flag_render':  (0.70, 0.40, 0.90),
+    'flag_viewer':  (0.85, 0.85, 0.85),
 }
+
+# Tile layout in network-editor units. Edit the 'tile' table to calibrate
+# against a screenshot of the editor at 100% zoom.
+DEFAULT_TILE = {
+    'border':    3,    # family-coloured edge
+    'namestrip': 18,   # height of the name strip along the bottom
+    'namesize':  11,   # name font size
+    'typesize':  16,   # operator type font size on tiles without a viewer
+    'titlesize': 16,   # frame / annotation title font size
+    'flagw':     7,    # flag width
+    'flagh':     12,   # flag height
+    'conn':      8,    # connector tab size
+}
+
+try:
+    _OPVIEWER = opviewerTOP
+except NameError:
+    _OPVIEWER = None
 
 # op.color of a node nobody has recoloured
 DEFAULT_NODE_COLOR = (0.55, 0.55, 0.55)
@@ -65,12 +94,17 @@ def _smooth(v):
 
 
 def _setpar(o, name, value):
-    """Set a parameter if it exists; parameter names differ between builds."""
+    """Set a parameter if it exists; names and menu entries differ
+    between builds."""
     p = getattr(o.par, name, None)
-    if p is not None:
-        p.val = value
+    if p is None:
+        return False
+    try:
+        if p.val != value:
+            p.val = value
         return True
-    return False
+    except Exception:
+        return False
 
 
 def _typeLabel(o):
@@ -122,6 +156,17 @@ class NetGraphExt:
                     pass
         return cols
 
+    def Tile(self):
+        tile = dict(DEFAULT_TILE)
+        t = self.ownerComp.op('tile')
+        if t is not None:
+            for r in range(1, t.numRows):
+                try:
+                    tile[t[r, 0].val] = float(t[r, 1])
+                except (ValueError, TypeError):
+                    pass
+        return tile
+
     def _visibleChildren(self, comp):
         ops, notes = [], []
         for c in comp.children:
@@ -142,6 +187,7 @@ class NetGraphExt:
         self.MaxRank = 0
         self._index = {}
         self._cols = self.Colors()
+        self._tile = self.Tile()
         self._scale = p.Scale.eval()
         self._gap = p.Networkgap.eval()
         self._maxLevel = int(p.Recurse.eval())
@@ -222,9 +268,6 @@ class NetGraphExt:
             fam = o.family
             tint = tuple(o.color)
             custom = tuple(round(c, 3) for c in tint) != DEFAULT_NODE_COLOR
-            preview = ''
-            if fam == 'TOP' and (self._previews == 'all' or (self._previews == 'viewer' and o.viewer)):
-                preview = o.path
             n = {
                 'path': o.path, 'name': o.name, 'type': o.OPType, 'label': _typeLabel(o),
                 'family': fam, 'level': level, 'rank': baseRank,
@@ -232,9 +275,15 @@ class NetGraphExt:
                 'x': wx + o.nodeWidth * s * 0.5, 'y': wy + o.nodeHeight * s * 0.5, 'z': 0.0,
                 'w': o.nodeWidth * s, 'h': o.nodeHeight * s,
                 'netw': o.nodeWidth, 'neth': o.nodeHeight,
-                'color': cols.get(fam, cols['COMP']), 'tint': tint if custom else cols['tile'],
+                'color': cols.get(fam, cols['COMP']), 'tint': tint, 'custom': custom,
                 'bypass': bool(getattr(o, 'bypass', False)),
-                'preview': preview, 'conns': {},
+                'lock': bool(getattr(o, 'lock', False)),
+                'display': bool(getattr(o, 'display', False)),
+                'render': bool(getattr(o, 'render', False)),
+                'viewer': bool(getattr(o, 'viewer', False)),
+                'current': bool(getattr(o, 'current', False)),
+                'selected': bool(getattr(o, 'selected', False)),
+                'conns': {},
             }
             local[o.path] = len(self.Nodes)
             self._index[o.path] = len(self.Nodes)
@@ -372,8 +421,9 @@ class NetGraphExt:
             self._focus = added or moved
 
         structure = hash(tuple(
-            (n['path'], n['name'], n['type'], n['tint'], n['bypass'], n['preview'],
-             n['netw'], n['neth'], round(n['x'], 4), round(n['y'], 4)) for n in self.Nodes) +
+            (n['path'], n['name'], n['type'], n['tint'], n['netw'], n['neth'],
+             round(n['x'], 4), round(n['y'], 4), n['bypass'], n['lock'], n['display'],
+             n['render'], n['viewer'], n['current'], n['selected']) for n in self.Nodes) +
             tuple((w['a'], w['b'], w['kind']) for w in self.Wires) +
             tuple((pl['key'], pl['title'], pl['color'], round(pl['x'], 4), round(pl['y'], 4),
                    round(pl['w'], 4), round(pl['h'], 4)) for pl in self.Panels))
@@ -486,7 +536,7 @@ class NetGraphExt:
     # ---- outputs ---------------------------------------------------
 
     def _cook(self):
-        for name in ('inst', 'notes', 'conn', 'wires'):
+        for name in ('inst', 'flags', 'notes', 'conn', 'wires'):
             o = self.ownerComp.op(name)
             if o is not None:
                 o.cook(force=True)
@@ -497,144 +547,228 @@ class NetGraphExt:
             return
         t.clear()
         t.appendRow(['index', 'path', 'name', 'family', 'type', 'level', 'rank',
-                     'x', 'y', 'z', 'w', 'h', 'preview'])
+                     'x', 'y', 'z', 'w', 'h', 'view'])
         for i, n in enumerate(self.Nodes):
             t.appendRow([i, n['path'], n['name'], n['family'], n['type'], n['level'], n['rank'],
                          round(n['x'], 4), round(n['y'], 4), round(n['z'], 4),
-                         round(n['w'], 4), round(n['h'], 4), n['preview']])
+                         round(n['w'], 4), round(n['h'], 4), self._viewSource(n)])
+
+    def _viewSource(self, n):
+        """What fills a node's viewer area: 'top' (the TOP's own image),
+        'op' (an OP Viewer TOP showing the operator's viewer, live) or
+        'icon' (the operator type, like a tile without a viewer)."""
+        mode = self._previews
+        if mode == 'none':
+            return 'icon'
+        if mode == 'viewer' and not n['viewer']:
+            return 'icon'
+        if n['family'] == 'TOP':
+            return 'top'
+        if mode == 'tops':
+            return 'icon'
+        return 'op' if _OPVIEWER is not None else 'icon'
 
     def _syncCards(self):
-        """One Geometry COMP per node and panel with a texture face, keyed
-        by path so live edits only touch what changed. Their transforms
-        follow the 'inst' / 'notes' CHOPs by expression."""
+        """One card per node and panel, keyed by path so live edits only
+        touch what changed. A node card is a Geometry COMP holding a live
+        viewer quad and a name strip quad; the card follows the 'inst' /
+        'notes' CHOPs by expression."""
         cards = self.ownerComp.op('cards')
         cols = self._cols
-        res = self.ownerComp.par.Labelres.eval()
+        tile = self._tile
+        s = self._scale
+        p = self.ownerComp.par
+        lres, vres = p.Labelres.eval(), p.Viewerres.eval()
         wanted = {}
         for i, n in enumerate(self.Nodes):
-            bg = cols['bypass'] if n['bypass'] else n['tint']
+            b, ns = tile['border'], tile['namestrip']
+            vw, vh = n['netw'] - 2 * b, n['neth'] - 2 * b - ns
+            src = self._viewSource(n)
             wanted[n['path']] = ('inst', i, dict(
-                netw=n['netw'], neth=n['neth'], text=n['name'], label=n['label'], bg=bg,
-                preview=n['preview'], panel=False))
+                panel=False, path=n['path'], src=src, text=n['name'], label=n['label'],
+                strip=n['tint'] if n['custom'] else cols['strip'],
+                iconbg=cols['tile'], bypass=n['bypass'],
+                # local layout in world units, relative to the node centre
+                view=(0.0, ns * 0.5 * s, vw * s, vh * s) if vh > 4 else None,
+                name=(0.0, (-n['neth'] * 0.5 + b + ns * 0.5) * s, vw * s, ns * s),
+                viewpx=(max(8, int(vw * vres)), max(8, int(vh * vres))),
+                namepx=(max(8, int(vw * lres)), max(8, int(ns * lres)))))
         for i, pl in enumerate(self.Panels):
             netw = max(64, pl['netw'])
+            neth = netw * pl['h'] / max(1e-6, pl['w'])
             wanted['panel:' + pl['key']] = ('notes', i, dict(
-                netw=netw, neth=netw * pl['h'] / max(1e-6, pl['w']), text=pl['title'], label='',
-                bg=pl['color'], preview='', panel=True))
+                panel=True, path='', src='', text=pl['title'], label='', strip=pl['color'],
+                iconbg=pl['color'], bypass=False, view=None,
+                name=(0.0, 0.0, pl['w'], pl['h']), viewpx=None,
+                namepx=(max(8, int(netw * lres * 0.5)), max(8, int(neth * lres * 0.5)))))
 
         for key in list(self._cards):
             if key not in wanted:
-                cid, _ = self._cards.pop(key)
-                for c in cards.ops('c{}_*'.format(cid)) + cards.ops('c{}'.format(cid)):
-                    c.destroy()
+                cid = self._cards.pop(key)[0]
+                old = cards.op('c{}'.format(cid))
+                if old is not None:
+                    old.destroy()
 
         for key, (src, idx, spec) in wanted.items():
-            content = (int(spec['netw'] * res), int(spec['neth'] * res), spec['preview'], spec['panel'])
+            content = (spec['src'], spec['path'], spec['view'] is not None, spec['viewpx'], spec['namepx'])
             have = self._cards.get(key)
             if have is not None and have[1] != content:
-                for c in cards.ops('c{}_*'.format(have[0])) + cards.ops('c{}'.format(have[0])):
-                    c.destroy()
+                old = cards.op('c{}'.format(have[0]))
+                if old is not None:
+                    old.destroy()
                 have = None
             if have is None:
                 cid = self._nextCard
                 self._nextCard += 1
-                self._makeCard(cards, cid, spec, res)
-                self._cards[key] = (cid, content)
-            cid = self._cards[key][0]
-            self._styleCard(cards, cid, spec, cols)
+                self._makeCard(cards, cid, spec)
+                have = (cid, content, None)
+            cid = have[0]
             geo = cards.op('c{}'.format(cid))
-            ref = "op('../{0}')".format(src)
-            geo.par.tx.expr = "{0}['tx'][{1}]".format(ref, idx)
-            geo.par.ty.expr = "{0}['ty'][{1}]".format(ref, idx)
-            geo.par.tz.expr = "{0}['fz'][{1}]".format(ref, idx)
-            geo.par.sx.expr = "{0}['fx'][{1}]".format(ref, idx)
-            geo.par.sy.expr = "{0}['fy'][{1}]".format(ref, idx)
+            self._styleCard(geo, spec, cols, tile)
+            if have[2] != (src, idx):
+                # sample index changes when operators come and go
+                ref = "op('../{0}')".format(src)
+                geo.par.tx.expr = "{0}['tx'][{1}]".format(ref, idx)
+                geo.par.ty.expr = "{0}['ty'][{1}]".format(ref, idx)
+                geo.par.tz.expr = "{0}['fz'][{1}]".format(ref, idx)
+                for sp in ('sx', 'sy', 'sz'):
+                    getattr(geo.par, sp).expr = "{0}['sc'][{1}]".format(ref, idx)
+            self._cards[key] = (cid, content, (src, idx))
 
-    def _makeCard(self, cards, cid, spec, res):
-        name = 'c{}'.format(cid)
-        w = max(16, int(spec['netw'] * res))
-        h = max(16, int(spec['neth'] * res))
-        layers = []
-        txt = cards.create(textTOP, name + '_name')
-        layers.append(txt)
-        if spec['preview']:
-            img = cards.create(selectTOP, name + '_img')
-            img.par.top = spec['preview']
-            layers.append(img)
-        elif not spec['panel']:
-            typ = cards.create(textTOP, name + '_type')
-            layers.insert(0, typ)
-        for t in layers:
-            _setpar(t, 'outputresolution', 'custom')
-            _setpar(t, 'resolutionw', w)
-            _setpar(t, 'resolutionh', h)
-        tex = layers[-1]
-        for k in range(len(layers) - 2, -1, -1):
-            over = cards.create(overTOP, '{}_over{}'.format(name, k))
-            over.inputConnectors[0].connect(layers[k])
-            over.inputConnectors[1].connect(tex)
-            tex = over
-        mat = cards.create(constantMAT, name + '_mat')
-        mat.par.colormap = tex.name
-        geo = cards.create(geometryCOMP, name)
+    def _makeCard(self, cards, cid, spec):
+        geo = cards.create(geometryCOMP, 'c{}'.format(cid))
         for c in list(geo.children):
             c.destroy()
-        quad = geo.create(selectSOP, 'quad')
-        quad.par.sop = '../../quad'
-        quad.render = quad.display = True
-        geo.par.material = mat.name
-        # tidy layout inside 'cards'
-        x, y = (cid % 8) * 900, -(cid // 8) * 250
-        for k, o_ in enumerate(cards.ops(name + '_*') + [geo]):
-            o_.nodeX, o_.nodeY = x + k * 130, y
+        geo.nodeX, geo.nodeY = (cid % 10) * 150, -(cid // 10) * 120
+        parts = [('name', spec['namepx'])]
+        if spec['view'] is not None:
+            parts.insert(0, ('view', spec['viewpx']))
+        for k, (part, (pw, ph)) in enumerate(parts):
+            y = -k * 300
+            if part == 'view' and spec['src'] == 'top':
+                sel = geo.create(selectTOP, 'view_src')
+                sel.par.top = spec['path']
+                tex = geo.create(fitTOP, 'view')
+                tex.inputConnectors[0].connect(sel)
+                _setpar(tex, 'fit', 'best')
+                sel.nodeX, sel.nodeY = -200, y
+            elif part == 'view' and spec['src'] == 'op':
+                tex = geo.create(_OPVIEWER, 'view')
+                _setpar(tex, 'opviewer', spec['path'])
+            else:
+                tex = geo.create(textTOP, part)
+            _setpar(tex, 'outputresolution', 'custom')
+            _setpar(tex, 'resolutionw', pw)
+            _setpar(tex, 'resolutionh', ph)
+            mat = geo.create(constantMAT, part + '_mat')
+            mat.par.colormap = tex.name
+            g = geo.create(geometryCOMP, 'g' + part)
+            for c in list(g.children):
+                c.destroy()
+            q = g.create(selectSOP, 'quad')
+            q.par.sop = '../../../quad'
+            q.render = q.display = True
+            g.par.material = mat.name
+            for j, o_ in enumerate((tex, mat, g)):
+                o_.nodeX, o_.nodeY = j * 200, y
 
-    def _styleCard(self, cards, cid, spec, cols):
-        name = 'c{}'.format(cid)
+    def _styleCard(self, geo, spec, cols, tile):
+        for part in ('view', 'name'):
+            rect = spec[part]
+            g = geo.op('g' + part)
+            if rect is None or g is None:
+                continue
+            g.par.tx, g.par.ty = rect[0], rect[1]
+            g.par.sx, g.par.sy = rect[2], rect[3]
         res = self.ownerComp.par.Labelres.eval()
-        txt = cards.op(name + '_name')
-        txt.par.text = spec['text']
-        panel = spec['panel']
-        _setpar(txt, 'fontsizex', (16 if panel else 14) * res)
-        _setpar(txt, 'alignx', 'left' if panel else 'center')
-        _setpar(txt, 'aligny', 'top' if panel else 'bottom')
-        _setpar(txt, 'positionx', 10 * res if panel else 0)
-        _setpar(txt, 'positiony', -8 * res if panel else 6 * res)
+        name = geo.op('name')
+        name.par.text = spec['text']
         fg = cols['text']
-        _setpar(txt, 'fontcolorr', fg[0]); _setpar(txt, 'fontcolorg', fg[1]); _setpar(txt, 'fontcolorb', fg[2])
-        bg = spec['bg']
-        _setpar(txt, 'bgcolorr', bg[0]); _setpar(txt, 'bgcolorg', bg[1]); _setpar(txt, 'bgcolorb', bg[2])
-        _setpar(txt, 'bgalpha', 0 if spec['preview'] else 1)
-        typ = cards.op(name + '_type')
-        if typ is not None:
-            # operator type where the editor draws its icon
-            typ.par.text = spec['label']
+        _setpar(name, 'fontcolorr', fg[0]); _setpar(name, 'fontcolorg', fg[1]); _setpar(name, 'fontcolorb', fg[2])
+        bg = spec['strip']
+        _setpar(name, 'bgcolorr', bg[0]); _setpar(name, 'bgcolorg', bg[1]); _setpar(name, 'bgcolorb', bg[2])
+        _setpar(name, 'bgalpha', 1)
+        if spec['panel']:
+            _setpar(name, 'fontsizex', tile['titlesize'] * res * 0.5)
+            _setpar(name, 'alignx', 'left')
+            _setpar(name, 'aligny', 'top')
+            _setpar(name, 'positionx', 8 * res * 0.5)
+            _setpar(name, 'positiony', -6 * res * 0.5)
+        else:
+            _setpar(name, 'fontsizex', tile['namesize'] * res)
+            _setpar(name, 'alignx', 'left')
+            _setpar(name, 'aligny', 'center')
+            _setpar(name, 'positionx', 3 * res)
+        view = geo.op('view')
+        if view is not None and spec['src'] == 'icon':
+            # no viewer: the operator type where the editor draws its icon
             tc = cols['type']
-            _setpar(typ, 'fontsizex', 20 * res)
-            _setpar(typ, 'alignx', 'center')
-            _setpar(typ, 'aligny', 'center')
-            _setpar(typ, 'positiony', 8 * res)
-            _setpar(typ, 'fontcolorr', tc[0]); _setpar(typ, 'fontcolorg', tc[1]); _setpar(typ, 'fontcolorb', tc[2])
-            _setpar(typ, 'bgalpha', 0)
+            bg = cols['bypass'] if spec['bypass'] else spec['iconbg']
+            view.par.text = spec['label']
+            _setpar(view, 'fontsizex', tile['typesize'] * self.ownerComp.par.Viewerres.eval())
+            _setpar(view, 'alignx', 'center')
+            _setpar(view, 'aligny', 'center')
+            _setpar(view, 'fontcolorr', tc[0]); _setpar(view, 'fontcolorg', tc[1]); _setpar(view, 'fontcolorb', tc[2])
+            _setpar(view, 'bgcolorr', bg[0]); _setpar(view, 'bgcolorg', bg[1]); _setpar(view, 'bgcolorb', bg[2])
+            _setpar(view, 'bgalpha', 1)
+        # bypassed operators read dimmed, like the editor
+        for part in ('view', 'name'):
+            mat = geo.op(part + '_mat')
+            if mat is not None:
+                k = 0.45 if spec['bypass'] else 1.0
+                _setpar(mat, 'colorr', k); _setpar(mat, 'colorg', k); _setpar(mat, 'colorb', k)
 
     # ---- cook callbacks (Script CHOP / SOP) ------------------------
 
     def CookInst(self, scriptOp):
-        """Node slabs: tx ty tz sx sy sz r g b, plus card face fz fx fy."""
+        """Node slabs (tx ty tz sx sy sz r g b) and card placement
+        (fz = face depth, sc = reveal/birth scale). The slab is the tile's
+        border: family colour, or the highlight for the current/selected
+        operator."""
         p = self.ownerComp.par
         depth = p.Depth.eval()
-        inset = p.Border.eval()
+        cols = self._cols
+        hl = p.Highlight.eval()
         poses, _ = self.Layout()
-        chans = {k: [] for k in ('tx', 'ty', 'tz', 'sx', 'sy', 'sz', 'r', 'g', 'b', 'fz', 'fx', 'fy')}
+        chans = {k: [] for k in ('tx', 'ty', 'tz', 'sx', 'sy', 'sz', 'r', 'g', 'b', 'fz', 'sc')}
         for n, (x, y, z, s) in zip(self.Nodes, poses):
-            # the tile face is inset, the slab around it shows the family colour
-            col = n['color'] if not n['bypass'] else (0.3, 0.3, 0.3)
+            col = n['color']
+            if hl and n['current']:
+                col = cols['current']
+            elif hl and n['selected']:
+                col = cols['selected']
             chans['tx'].append(x); chans['ty'].append(y); chans['tz'].append(z - depth * 0.5)
             chans['sx'].append(n['w'] * s); chans['sy'].append(n['h'] * s); chans['sz'].append(depth * max(s, 1e-4))
             chans['r'].append(col[0]); chans['g'].append(col[1]); chans['b'].append(col[2])
             chans['fz'].append(z + 0.001)
-            chans['fx'].append(max(0.0, n['w'] - inset * 2) * s)
-            chans['fy'].append(max(0.0, n['h'] - inset * 2) * s)
+            chans['sc'].append(max(s, 1e-4))
         self._writeChop(scriptOp, chans, len(self.Nodes))
+
+    def CookFlags(self, scriptOp):
+        """Lit flags on the tile edges: bypass and lock on the left,
+        display and render on the right, viewer-active bottom right."""
+        depth = self.ownerComp.par.Depth.eval()
+        cols = self._cols
+        tile = self._tile
+        sc = self._scale
+        fw, fh, b = tile['flagw'] * sc, tile['flagh'] * sc, tile['border'] * sc
+        poses, _ = self.Layout()
+        chans = {k: [] for k in ('tx', 'ty', 'tz', 'sx', 'sy', 'sz', 'r', 'g', 'b')}
+        for n, (x, y, z, s) in zip(self.Nodes, poses):
+            top = n['h'] * 0.5 - b - fh * 0.5
+            left = -n['w'] * 0.5 + b + fw * 0.5
+            right = -left
+            slots = (('bypass', left, top), ('lock', left, top - fh * 1.2),
+                     ('display', right, top), ('render', right, top - fh * 1.2),
+                     ('viewer', right, -n['h'] * 0.5 + b + fh * 0.5))
+            for flag, fx, fy in slots:
+                if not n[flag]:
+                    continue
+                col = cols['flag_' + flag]
+                chans['tx'].append(x + fx * s); chans['ty'].append(y + fy * s); chans['tz'].append(z + 0.002)
+                chans['sx'].append(fw * s); chans['sy'].append(fh * s); chans['sz'].append(depth * 0.1 * max(s, 1e-4))
+                chans['r'].append(col[0]); chans['g'].append(col[1]); chans['b'].append(col[2])
+        self._writeChop(scriptOp, chans, len(chans['tx']))
 
     def CookNotes(self, scriptOp):
         """Frames and annotations: flat panels behind the nodes."""
@@ -650,7 +784,7 @@ class NetGraphExt:
         """Connector tabs on the node edges."""
         p = self.ownerComp.par
         depth = p.Depth.eval()
-        size = p.Connsize.eval()
+        size = self._tile['conn'] * self._scale
         poses, _ = self.Layout()
         chans = {k: [] for k in ('tx', 'ty', 'tz', 'sx', 'sy', 'sz', 'r', 'g', 'b')}
         for c in self.Conns:

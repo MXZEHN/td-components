@@ -1,5 +1,5 @@
 # Parameters that change the layout or the cards
-UPDATE = ('Recurse', 'Scale', 'Networkgap', 'Labelres', 'Previews')
+UPDATE = ('Recurse', 'Scale', 'Networkgap', 'Labelres', 'Viewerres', 'Previews')
 
 
 def onPulse(par):

@@ -1,7 +1,13 @@
 # net3d
 
-Rebuilds a TouchDesigner network in 3D, laid out like the network editor. Nodes keep their positions and sizes,
-show their family colour, operator type and name, and TOPs with the viewer flag on show their image. Connectors and
+Rebuilds a TouchDesigner network in 3D, laid out like the network editor. Each node is built like an editor tile
+and keeps its position and size:
+
+- a live viewer showing what the operator shows in the editor: the TOP's image, the CHOP's channels, the SOP's
+  geometry, the DAT's text
+- a name strip along the bottom
+- a family-coloured border, with the current and selected operators highlighted
+- its lit flags: bypass, lock, display, render, viewer active Connectors and
 curved wires are drawn like the editor's, and annotations appear as panels. Nested networks are stacked along X,
 each in its own titled frame and linked back to its COMP.
 
@@ -15,7 +21,8 @@ Everything is driven by parameters, so you can animate it:
 > **Status: untested in TouchDesigner.** This was written without a TouchDesigner session, so there is no `.tox`
 > yet. The scan, layout, reveal and wire geometry were exercised against a mocked network in plain Python. The
 > operator wiring and parameter names in `build_net3d.py` still need a first run in TD. The scan, hierarchy
-> layout, live updates and camera follow were also exercised against that mocked network.
+> layout, live updates, camera follow and tile building were also exercised against that mocked network. The OP
+> Viewer TOP parameter (`opviewer`) and the Fit TOP mode (`best`) are from memory, not checked against TD.
 
 ## Build
 
@@ -41,13 +48,13 @@ Everything is driven by parameters, so you can animate it:
 | Recurse Depth | 0 | Also rebuild networks inside COMPs, this many levels deep (see Hierarchy) |
 | Scale | 0.01 | World units per network-editor unit (a default node is about 1.3 x 0.9) |
 | Node Depth | 0.12 | Thickness of the node slabs |
-| Border | 0.04 | Family-coloured edge around each tile |
-| Connector Size | 0.08 | Size of the input/output tabs |
 | Wire Width / Segments | 0.035 / 32 | Wire ribbon width and smoothness |
 | Network Gap | 2 | X gap between stacked networks |
 | Hierarchy Links | on | Draw the dashed links between a COMP and its network |
-| TOP Previews | Viewer Flag | Show TOP images on tiles: viewer flag on, all TOPs, or none |
-| Label Resolution | 2 | Pixels per network unit for the tile textures |
+| TOP Previews | All Operators | What fills each tile's viewer area: live viewers for all operators, TOPs only, only operators with Viewer Active on, or none (operator type labels) |
+| Viewer Resolution | 2 | Pixels per network unit for the live viewers |
+| Label Resolution | 3 | Pixels per network unit for the name strips |
+| Highlight Current | on | Border colour marks the current (`current`) and selected (`selected`) operators |
 
 **Animate**
 
@@ -73,9 +80,23 @@ follow drives the internal `cam` only, so leave the Render page's Camera empty t
 
 **Render**: `Camera` (empty uses the internal `cam`), `Frame All` (points `cam` at the whole network), `Resolution`.
 
-Colours live in the `colors` table (`bg`, one row per family, `tile`, `text`, `type`, `bypass`, `annotate`,
-`frame`, `hier`). They are
-approximations of the editor theme; calibrate them against a screenshot of your editor.
+### Matching the editor
+
+The tile look is driven by two tables. Change them, then pulse **Rebuild**.
+
+- `colors`: `bg`, one row per family (border and wires), `strip` (name strip), `tile` (viewer area without a
+  viewer), `text`, `type`, `bypass`, `current`, `selected`, `flag_*`, `annotate`, `frame`, `hier`.
+- `tile`, in network-editor units: `border`, `namestrip` (name strip height), `namesize`, `typesize`, `titlesize`,
+  `flagw`, `flagh`, `conn` (connector tab size).
+
+The defaults are from memory of the editor, not measured. To calibrate:
+
+1. Set the network editor to 100% zoom so 1 pixel = 1 network unit.
+2. Take a screenshot of a few nodes of each family with flags on.
+3. Read the sizes and colours off the screenshot into the tables.
+4. Compare `out1` side by side with the screenshot.
+
+Operators that get a custom colour in the editor use it for their name strip.
 
 ## How it works
 
@@ -86,11 +107,23 @@ approximations of the editor theme; calibrate them against a screenshot of your 
 | `inst` / `conn` / `notes` | Script CHOPs: per-node slab, connector and panel (frame, annotation) transforms and colours |
 | `geo_slabs`, `geo_conn` | Instanced boxes from `inst` and `conn` |
 | `wires` -> `geo_wires` | Script SOP of bezier ribbons coloured by the source node's family, plus dashed hierarchy links |
-| `cards` | One Geometry COMP per node and panel with Text TOP faces (type and name, or name over the node's image); transforms follow `inst` / `notes` |
+| `flags` -> `geo_flags` | Script CHOP of lit flags, instanced as tabs |
+| `cards` | One Geometry COMP per node (live viewer quad + name strip quad) and per panel; transforms follow `inst` / `notes` |
+| `colors`, `tile` | Look of the tiles, see Matching the editor |
 | `render` -> `out1` | Flat, unlit render on the editor background colour |
 
 Inputs sit on the left edge, outputs on the right, COMP connectors on the top and bottom, spaced like the editor.
-The operator type (`noiseTOP` -> `Noise`) is drawn where the editor draws its icon.
+
+Each card in `cards` is a Geometry COMP holding two quads. The viewer quad uses a Select TOP and a Fit TOP for TOPs,
+so the image keeps its aspect ratio. For every other family it uses an OP Viewer TOP, which renders the operator's
+own viewer live. Tiles without a viewer show the operator type (`noiseTOP` -> `Noise`) where the editor draws its
+icon. The name strip is a Text TOP. Flags are instanced tabs on the tile edges:
+
+- left: bypass and lock
+- right: display and render
+- bottom right: viewer active
+
+Bypassed tiles are dimmed.
 
 ### Hierarchy
 
@@ -107,8 +140,10 @@ Reveal treats a nested network as coming after its COMP, so it grows in after it
 
 ## Known gaps
 
-- No grid or flag buttons (bypass/lock/display/render) yet; bypassed nodes are greyed. The type is text, not the
-  editor's icon glyph.
+- No grid. The operator type is text, not the editor's icon glyph. Flags are drawn only when lit.
+- A live viewer for every operator costs one OP Viewer TOP each. On big networks use TOPs Only, or lower the
+  Viewer Resolution.
+- COMPs show their panel through the OP Viewer TOP, which is empty for a Base COMP.
 - A nested network's slot moves when an earlier network grows, so in Live mode with recursion, frames to the
   right can shift.
 - Wires that leave the scanned networks (to a COMP outside the target) are not drawn.
