@@ -18,6 +18,9 @@ Everything is driven by parameters, so you can animate it:
 - fly a camera through it (for example with [`cam_nav`](../cam_nav/))
 - watch a patch in **Live** mode while you build it: new operators grow in and the camera follows them
 
+All operators of one component sit at the same depth. Only the contents of another component sit at another
+depth.
+
 > **Status: untested in TouchDesigner.** This was written without a TouchDesigner session, so there is no `.tox`
 > yet. The scan, layout, reveal and wire geometry were exercised against a mocked network in plain Python. The
 > operator wiring and parameter names in `build_net3d.py` still need a first run in TD. The scan, hierarchy
@@ -50,7 +53,9 @@ Everything is driven by parameters, so you can animate it:
 | Node Depth | 0.12 | Thickness of the node slabs |
 | Wire Width / Segments | 0.035 / 32 | Wire ribbon width and smoothness |
 | Layer Spacing | 4 | Z distance from a COMP node back to its network |
-| Hierarchy Links | on | Draw the dashed links between a COMP and its network |
+| Hierarchy Wires | on | Wires through the hierarchy: COMP input -> In OP, Out OP -> COMP output |
+| Reference Wires | on | Wires for operator references (a Select TOP's TOP, a Geometry COMP's material, ...), on any level |
+| Frame Guides | off | Thin dashed lines from a COMP tile's corners to its network's frame |
 | TOP Previews | All Operators | What fills each tile's viewer area: live viewers for all operators, TOPs only, only operators with Viewer Active on, or none (operator type labels) |
 | Viewer Resolution | 2 | Pixels per network unit for the live viewers |
 | Label Resolution | 3 | Pixels per network unit for the name strips |
@@ -61,7 +66,7 @@ Everything is driven by parameters, so you can animate it:
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | Reveal | 1 | 0..1. Nodes grow in by rank (longest path from a source), wires grow from output to input |
-| Explode | 0 | Pushes each node back by `Explode x rank` in Z |
+| Explode | 0 | Pushes the hierarchy levels further apart: `Explode x level` extra in Z |
 | Layer Opacity | 0.35 | Opacity per hierarchy level away from Focus Level (`0.35^distance`) |
 | Focus Level | 0 | Hierarchy level drawn solid; animate it to dive from a COMP into its network |
 
@@ -132,11 +137,15 @@ Bypassed tiles are dimmed.
 The target network keeps its own editor coordinates at z = 0, so editing it live doesn't shift what is already
 there. With Recurse Depth above 0, each nested network sits Layer Spacing further back than its COMP node,
 centred behind it and drawn inside a frame titled with its path. Two levels down is 2 x Layer Spacing back, and
-so on. Dashed links connect the hierarchy:
+so on. Every operator of a component shares that one depth. Connections between levels are drawn as the same
+bezier wires as inside a network, coloured by the source's family, easing from one depth to the other:
 
-- COMP tile corners -> its frame's corners, so the network reads as the COMP opened up behind it
-- COMP input *i* -> the In OP behind it
-- Out OP -> COMP output *i*
+- COMP input *i* -> the In OP behind it (leaves the COMP's input to the left, enters the In OP from the left)
+- Out OP -> COMP output *i* (leaves the Out OP to the right, enters the COMP's output from the right)
+- operator references: a parameter that points at another scanned operator (Select OPs, materials, ...) gets a
+  wire from the referenced operator to the one referencing it
+
+Frame Guides adds thin dashed lines from a COMP tile's corners to its network's frame.
 
 Reveal treats a nested network as coming after its COMP, so it grows in after it.
 
@@ -156,5 +165,8 @@ transparency is switched on when the build exposes it.
   apart in the editor, or increase Explode.
 - Seen straight on from the front, the deeper layers are hidden behind the top network. Orbit the camera or use
   Explode to see them.
+- Reference wires come from OP-type parameters only. A reference written into an expression (`op('foo')` in a
+  parameter) isn't found. Every operator's parameters are read on every scan, so in Live mode with big networks,
+  turn Reference Wires off or raise Poll Every N Frames.
 - Wires that leave the scanned networks (to a COMP outside the target) are not drawn.
 - Each node is a few operators (`cards`), so rebuilding very large networks (hundreds of nodes) is slow.

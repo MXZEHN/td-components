@@ -108,7 +108,9 @@ def _customPars(comp):
     p = page.appendFloat('Wirewidth', label='Wire Width')[0]; p.default = p.val = 0.035; p.normMax = 0.2
     p = page.appendInt('Wiresegs', label='Wire Segments')[0]; p.default = p.val = 32; p.normMax = 64
     p = page.appendFloat('Layerspacing', label='Layer Spacing')[0]; p.default = p.val = 4; p.normMax = 20
-    p = page.appendToggle('Hierlinks', label='Hierarchy Links')[0]; p.default = p.val = True
+    p = page.appendToggle('Hierlinks', label='Hierarchy Wires')[0]; p.default = p.val = True
+    p = page.appendToggle('References', label='Reference Wires')[0]; p.default = p.val = True
+    p = page.appendToggle('Framelinks', label='Frame Guides')[0]; p.default = p.val = False
     p = page.appendMenu('Previews', label='TOP Previews')[0]
     p.menuNames = ['all', 'tops', 'viewer', 'none']
     p.menuLabels = ['All Operators', 'TOPs Only', 'Viewer Active Only', 'None (Type Labels)']

@@ -8,9 +8,10 @@ network's +Y stays +Y, nodes face +Z.
 
 Hierarchy is stacked in Z: the target network keeps its own coordinates and
 sits at z = 0; each nested network sits Layer Spacing further back than its
-COMP node, centred behind it, inside a titled frame. Hierarchy links join a
-COMP to its network: the COMP tile's corners to the frame's corners, COMP
-input -> In OP, and Out OP -> COMP output.
+COMP node, centred behind it, inside a titled frame. All operators of one
+component share one depth. Wires run through the hierarchy (COMP input ->
+In OP, Out OP -> COMP output) and along operator references, drawn as the
+same bezier wires as inside a network.
 
 Rendering is data-driven so it can be animated:
   inst      Script CHOP, one sample per node -> instanced node slabs
@@ -23,7 +24,7 @@ Rendering is data-driven so it can be animated:
             strip, inside the family-coloured slab; one per panel too
 Tile proportions come from the 'tile' table, colours from 'colors'.
 Reveal (0..1) grows the network from its sources to its outputs, Explode
-pushes each node back in Z by its rank (longest path from a source).
+pushes the hierarchy levels further apart in Z.
 
 Live mode polls the network every few frames and updates in place: new
 operators grow in over Birth Time, and the internal camera follows the
@@ -189,6 +190,7 @@ class NetGraphExt:
         self.Nodes, self.Conns, self.Wires, self.Panels = [], [], [], []
         self.MaxRank = 0
         self._index = {}
+        self._ops = []
         self._cols = self.Colors()
         self._tile = self.Tile()
         self._scale = p.Scale.eval()
@@ -200,6 +202,8 @@ class NetGraphExt:
             debug('net3d: Target is not a COMP')
             return
         self._scanNetwork(target, 0, None, 0)
+        if p.References.eval():
+            self._linkReferences()
 
     def _scanNetwork(self, comp, level, parentNode, baseRank):
         ops, notes = self._visibleChildren(comp)
@@ -246,8 +250,8 @@ class NetGraphExt:
                 fy = fy0 if cy < 0 else fy1
                 self.Wires.append({
                     'a': (parentNode, cx * pn['w'] * 0.5, cy * pn['h'] * 0.5),
-                    'b': (None, fx, fy, oz - self.ownerComp.par.Depth.eval() * 2.5),
-                    'rs': pn['rank'], 'rd': baseRank, 'kind': 'hier', 'color': cols['hier']})
+                    'b': (None, fx, fy, oz - self.ownerComp.par.Depth.eval() * 2.5, level),
+                    'rs': pn['rank'], 'rd': baseRank, 'kind': 'frame', 'color': cols['hier']})
 
         for a in notes:
             wx, wy = world(a.nodeX, a.nodeY)
@@ -296,6 +300,7 @@ class NetGraphExt:
             local[o.path] = len(self.Nodes)
             self._index[o.path] = len(self.Nodes)
             self.Nodes.append(n)
+            self._ops.append(o)
 
         # connectors: inputs left, outputs right, COMP connectors top/bottom
         pending = []
@@ -347,9 +352,9 @@ class NetGraphExt:
                         self._linkInOut(o, ni)
 
     def _linkInOut(self, comp, ni):
-        """Hierarchy links: COMP input i -> its In OP, Out OP -> COMP output i."""
+        """Wires through the hierarchy, drawn like any other wire: COMP
+        input i -> its In OP, Out OP -> COMP output i."""
         n = self.Nodes[ni]
-        col = self._cols['hier']
         for i, c in enumerate(comp.inputConnectors):
             inner = getattr(c, 'inOP', None)
             di = self._index.get(inner.path) if inner is not None else None
@@ -357,15 +362,44 @@ class NetGraphExt:
                 continue
             d = self.Nodes[di]
             self.Wires.append({'a': (ni,) + n['conns']['in'][i], 'b': (di, -d['w'] * 0.5, 0.0),
-                               'rs': n['rank'], 'rd': d['rank'], 'kind': 'hier', 'color': col})
+                               'rs': n['rank'], 'rd': d['rank'], 'kind': 'in', 'color': d['color'],
+                               'src': ni, 'dst': di})
         for i, c in enumerate(comp.outputConnectors):
             inner = getattr(c, 'outOP', None)
             si = self._index.get(inner.path) if inner is not None else None
             if si is None:
                 continue
             sn = self.Nodes[si]
-            self.Wires.append({'a': (si, sn['w'] * 0.5, 0.0), 'b': (ni,) + n['conns']['out'][i],
-                               'rs': sn['rank'], 'rd': n['rank'] + 1, 'kind': 'hier', 'color': col})
+            a = sn['conns']['out'][0] if sn['conns'].get('out') else (sn['w'] * 0.5, 0.0)
+            self.Wires.append({'a': (si,) + a, 'b': (ni,) + n['conns']['out'][i],
+                               'rs': sn['rank'], 'rd': n['rank'] + 1, 'kind': 'out', 'color': sn['color'],
+                               'src': si, 'dst': ni})
+
+    def _linkReferences(self):
+        """Operator references (a Select TOP's TOP, a Geometry COMP's
+        material, ...) between scanned operators, on any level, drawn as
+        wires from the referenced operator to the one referencing it."""
+        wired = {(w['src'], w['dst']) for w in self.Wires if 'src' in w}
+        for di, o in enumerate(self._ops):
+            pars = getattr(o, 'pars', None)
+            if pars is None:
+                continue
+            for par in pars():
+                if not getattr(par, 'isOP', False):
+                    continue
+                try:
+                    v = par.eval()
+                except Exception:
+                    continue
+                for t in (v if isinstance(v, (list, tuple)) else [v]):
+                    si = self._index.get(getattr(t, 'path', None))
+                    if si is None or si == di or (si, di) in wired:
+                        continue
+                    wired.add((si, di))
+                    sn, dn = self.Nodes[si], self.Nodes[di]
+                    self.Wires.append({'a': (si, sn['w'] * 0.5, 0.0), 'b': (di, -dn['w'] * 0.5, 0.0),
+                                       'rs': sn['rank'], 'rd': dn['rank'], 'kind': 'ref',
+                                       'color': sn['color'], 'src': si, 'dst': di})
 
     def _rank(self, first, last):
         """Longest-path rank from sources, for the nodes [first, last)."""
@@ -535,7 +569,8 @@ class NetGraphExt:
             s = _smooth(r - n['rank'] * 2)
             if birth is not None:
                 s *= _smooth((self._now - self._born.get(n['path'], -1e9)) / birth)
-            poses.append((n['x'], n['y'], n['z'] - explode * n['rank'], s))
+            # every operator of a component shares its depth
+            poses.append((n['x'], n['y'], n['z'] - explode * n['level'], s))
         grow = []
         for w in self.Wires:
             start = w['rs'] * 2 + 1
@@ -799,13 +834,14 @@ class NetGraphExt:
     def CookNotes(self, scriptOp):
         """Frames and annotations: flat panels behind the nodes."""
         depth = self.ownerComp.par.Depth.eval()
+        explode = self.ownerComp.par.Explode.eval()
         chans = {k: [] for k in ('tx', 'ty', 'fz', 'fx', 'fy', 'sc', 'ca')}
         for pl in self.Panels:
             chans['sc'].append(1.0)
             # panels are see-through so they never hide nodes pushed behind them
             chans['ca'].append(self.LayerAlpha(pl['level']) * PANEL_ALPHA[pl['kind']])
             chans['tx'].append(pl['x']); chans['ty'].append(pl['y'])
-            chans['fz'].append(pl['z'] - depth * (2.5 if pl['kind'] == 'frame' else 1.5))
+            chans['fz'].append(pl['z'] - explode * pl['level'] - depth * (2.5 if pl['kind'] == 'frame' else 1.5))
             chans['fx'].append(pl['w']); chans['fy'].append(pl['h'])
         self._writeChop(scriptOp, chans, len(self.Panels))
 
@@ -835,13 +871,16 @@ class NetGraphExt:
             c.vals = vals if n else [0.0]
 
     def CookWires(self, scriptOp):
-        """Bezier ribbons from output to input connector, like the editor.
-        Hierarchy links are straight and dashed."""
+        """Bezier ribbons, like the editor's wires, for every connection:
+        wires inside a network, through the hierarchy (COMP <-> In/Out OP)
+        and operator references. Wires that change depth keep the same
+        horizontal tangents and ease from one layer to the other."""
         p = self.ownerComp.par
         width = p.Wirewidth.eval()
         segs = max(2, int(p.Wiresegs.eval()))
         depth = p.Depth.eval()
-        showHier = p.Hierlinks.eval()
+        explode = p.Explode.eval()
+        show = {'in': p.Hierlinks.eval(), 'out': p.Hierlinks.eval(), 'frame': p.Framelinks.eval()}
         poses, grow = self.Layout()
         scriptOp.clear()
         scriptOp.primAttribs.create('Cd', (1.0, 1.0, 1.0, 1.0))
@@ -849,23 +888,37 @@ class NetGraphExt:
         def end(e):
             ni, dx, dy = e[:3]
             if ni is None:
-                return (dx, dy, e[3])
+                return (dx, dy, e[3] - explode * e[4])
             x, y, z, s = poses[ni]
             return (x + dx * s, y + dy * s, z - depth * 0.5)
 
         for w, g in zip(self.Wires, grow):
-            if g <= 0.0 or (w['kind'] == 'hier' and not showHier):
+            kind = w['kind']
+            if g <= 0.0 or not show.get(kind, True):
                 continue
             p0, p3 = end(w['a']), end(w['b'])
-            if w['kind'] == 'hier':
+            # handle length grows with the distance, in depth too
+            dx = abs(p3[0] - p0[0])
+            dz = abs(p3[2] - p0[2])
+            if kind == 'frame':
                 p1 = tuple(a + (b - a) / 3.0 for a, b in zip(p0, p3))
                 p2 = tuple(a + (b - a) * 2.0 / 3.0 for a, b in zip(p0, p3))
-            elif w['kind'] == 'comp':
+            elif kind == 'comp':
                 d = max(abs(p3[1] - p0[1]) * 0.5, 0.3)
                 p1 = (p0[0], p0[1] - d, p0[2])
                 p2 = (p3[0], p3[1] + d, p3[2])
+            elif kind == 'in':
+                # out of the COMP's input to the left, into the In OP from the left
+                d = max(dx * 0.5, dz * 0.25, 0.3)
+                p1 = (p0[0] - d, p0[1], p0[2])
+                p2 = (p3[0] - d, p3[1], p3[2])
+            elif kind == 'out':
+                # out of the Out OP to the right, into the COMP's output from the right
+                d = max(dx * 0.5, dz * 0.25, 0.3)
+                p1 = (p0[0] + d, p0[1], p0[2])
+                p2 = (p3[0] + d, p3[1], p3[2])
             else:
-                d = max(abs(p3[0] - p0[0]) * 0.5, 0.3)
+                d = max(dx * 0.5, dz * 0.25, 0.3)
                 p1 = (p0[0] + d, p0[1], p0[2])
                 p2 = (p3[0] - d, p3[1], p3[2])
             n = max(2, int(segs * g))
@@ -875,13 +928,10 @@ class NetGraphExt:
                 u = 1.0 - t
                 k0, k1, k2, k3 = u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t
                 pts.append(tuple(k0 * p0[j] + k1 * p1[j] + k2 * p2[j] + k3 * p3[j] for j in range(3)))
-            kind = w['kind']
-            levels = [self.Nodes[e[0]]['level'] for e in (w['a'], w['b']) if e[0] is not None]
-            if w['b'][0] is None:
-                levels.append(max(levels) + 1)
+            levels = [self.Nodes[e[0]]['level'] if e[0] is not None else e[4] for e in (w['a'], w['b'])]
             alpha = min(self.LayerAlpha(lv) for lv in levels)
-            self._ribbon(scriptOp, pts, width * (0.6 if kind == 'hier' else 1.0), w['color'] + (alpha,),
-                         dashed=kind == 'hier')
+            frame = kind == 'frame'
+            self._ribbon(scriptOp, pts, width * (0.5 if frame else 1.0), w['color'] + (alpha,), dashed=frame)
 
     @staticmethod
     def _ribbon(scriptOp, pts, width, col, dashed=False):
