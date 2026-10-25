@@ -21,6 +21,16 @@ Everything is driven by parameters, so you can animate it:
 All operators of one component sit at the same depth. Only the contents of another component sit at another
 depth.
 
+**Built for recording tutorials.** By default, net3d re-uses TouchDesigner's own pixels:
+
+- Node tiles are cropped from a screen grab of the network editor.
+- The panes, timeline, menus and popups are crops of the same grab, on a 2D UI layer on top.
+- The 3D camera mirrors the editor's view pixel for pixel.
+
+So straight on, the output looks like TD, and it turns 3D when you dive into components, explode the hierarchy
+or move the camera. Mouse, clicks and keys are shown on the UI layer. See [UI_LAYER.md](UI_LAYER.md) for the
+design and calibration.
+
 > **Status: untested in TouchDesigner.** This was written without a TouchDesigner session, so there is no `.tox`
 > yet. The scan, layout, reveal and wire geometry were exercised against a mocked network in plain Python. The
 > operator wiring and parameter names in `build_net3d.py` still need a first run in TD. The scan, hierarchy
@@ -56,6 +66,7 @@ depth.
 | Hierarchy Wires | on | Wires through the hierarchy: COMP input -> In OP, Out OP -> COMP output |
 | Reference Wires | on | Wires for operator references (a Select TOP's TOP, a Geometry COMP's material, ...), on any level |
 | Frame Guides | off | Thin dashed lines from a COMP tile's corners to its network's frame |
+| Tile Source | Captured from Editor | Real tiles cropped from the screen grab (drawn tile until a node has been on screen once), or Drawn |
 | TOP Previews | All Operators | What fills each tile's viewer area: live viewers for all operators, TOPs only, only operators with Viewer Active on, or none (operator type labels) |
 | Viewer Resolution | 2 | Pixels per network unit for the live viewers |
 | Label Resolution | 3 | Pixels per network unit for the name strips |
@@ -109,7 +120,28 @@ it's a network editor, otherwise the first one). When that changes, the camera a
 Call `op('net3d').Dive('/project1/fx')` to run the same move from a script, for a scripted fly-through.
 `Dive(path, duration)` overrides Dive Time. Frame All frames the component you're in.
 
-**Render**: `Camera` (empty uses the internal `cam`), `Frame All` (points `cam` at the whole network), `Resolution`.
+**UI Layer** (see [UI_LAYER.md](UI_LAYER.md))
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| UI Layer | on | 2D layer on top: TD chrome, popups, cursor, clicks, keys |
+| TD Chrome | Around the Editor | Panes and regions around the 3D network like TD, fading in when used, or off |
+| Hold / Fade Time | 2.5 / 0.25 | Seconds an element stays after its last signal / fade duration |
+| Cursor, Click Ripples, Keys, Mouse Buttons | on | Overlays |
+| Calibration Overlay | off | Predicted tile rectangles over the grab, for calibrating |
+| Cursor Size, Path Bar Height | 7, 28 | Pixels |
+| Mouse Offset / Scale, Network Offset / Zoom Scale | 0 / 1 | Calibration of the screen <-> network mapping |
+
+Tables: `regions` (timeline, menu bar, ... in window UV) and `popups` (menu sizes in pixels).
+
+**Render**
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| Camera Mode | Mirror Editor View | Line the edited network up with the editor pixel for pixel, or follow new operators |
+| Camera | empty | Your own camera instead of the internal `cam` |
+| Frame All | pulse | Frame the current component |
+| Resolution | 1920 x 1080 | Output size when the UI layer is off (with it on, the output is the TD window's size) |
 
 ### Matching the editor
 
@@ -141,7 +173,12 @@ Operators that get a custom colour in the editor use it for their name strip.
 | `flags` -> `geo_flags` | Script CHOP of lit flags, instanced as tabs |
 | `cards` | One Geometry COMP per node (live viewer quad + name strip quad) and per panel; transforms follow `inst` / `notes` |
 | `colors`, `tile` | Look of the tiles, see Matching the editor |
-| `render` -> `out1` | Flat, unlit render on the editor background colour |
+| `render` | Flat, unlit 3D render; with the UI layer it covers the network editor's rectangle |
+| `UILayerExt` | Extension: sensors (mouse, keys, panes, editor view, parameters, time), screen <-> network mapping, UI elements |
+| `grab`, `mouse`, `keys` | Screen Grab TOP of the TD window, Mouse In CHOP, Keyboard In DAT (-> `keys_cb`) |
+| `ui` -> `ui_cards` -> `render_ui` | Script CHOP of UI element placement and opacity, one card per element, orthographic render |
+| `tiles` | Script CHOP: each node's tile rectangle in the grab, visible now / seen before |
+| `world_place`, `over_ui` -> `out1` | 3D render placed in the window, UI layer on top |
 
 Inputs sit on the left edge, outputs on the right, COMP connectors on the top and bottom, spaced like the editor.
 

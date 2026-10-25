@@ -14,6 +14,10 @@ import os
 
 SCRIPTS = {
     'NetGraphExt': 'NetGraphExt.py',
+    'UILayerExt': 'UILayerExt.py',
+    'ui_cb': 'ui_cb.py',
+    'tiles_cb': 'tiles_cb.py',
+    'keys_cb': 'keys_cb.py',
     'inst_cb': 'inst_cb.py',
     'notes_cb': 'notes_cb.py',
     'conn_cb': 'conn_cb.py',
@@ -48,6 +52,26 @@ COLORS = [
     ('flag_display', 0.30, 0.60, 0.95),
     ('flag_render', 0.70, 0.40, 0.90),
     ('flag_viewer', 0.85, 0.85, 0.85),
+    ('flag_error', 0.90, 0.20, 0.20),
+    ('flag_warning', 0.95, 0.75, 0.10),
+    ('hover', 0.75, 0.75, 0.75),
+]
+
+# Window regions TD does not report as panes, in window UV (origin bottom
+# left). Rough defaults; calibrate with UI Debug against the grab.
+REGIONS = [
+    ('name', 'u0', 'v0', 'u1', 'v1', 'trigger'),
+    ('timeline', 0.0, 0.0, 1.0, 0.045, 'time'),
+    ('menubar', 0.0, 0.97, 1.0, 1.0, 'always'),
+]
+
+# Popups opened over the editor: pixels, anchor = top-left corner relative
+# to the click.
+POPUPS = [
+    ('kind', 'w', 'h', 'dx', 'dy'),
+    ('context', 260, 420, 0, 0),
+    ('create', 680, 470, -340, 235),
+    ('info', 380, 280, 10, 0),
 ]
 
 # network-editor units, see DEFAULT_TILE in NetGraphExt
@@ -116,6 +140,10 @@ def _customPars(comp):
     p.menuLabels = ['All Operators', 'TOPs Only', 'Viewer Active Only', 'None (Type Labels)']
     p.default = p.val = 'all'
     p = page.appendFloat('Viewerres', label='Viewer Resolution')[0]; p.default = p.val = 2; p.normMin = 0.5; p.normMax = 4
+    p = page.appendMenu('Tilesource', label='Tile Source')[0]
+    p.menuNames = ['drawn', 'captured']
+    p.menuLabels = ['Drawn', 'Captured from Editor']
+    p.default = p.val = 'captured'
     p = page.appendFloat('Labelres', label='Label Resolution')[0]; p.default = p.val = 3; p.normMin = 0.5; p.normMax = 6
     p = page.appendToggle('Highlight', label='Highlight Current')[0]; p.default = p.val = True
 
@@ -138,12 +166,113 @@ def _customPars(comp):
     p = page.appendToggle('Followeditor', label='Follow Editor')[0]; p.default = p.val = True
     p = page.appendFloat('Transitiontime', label='Dive Time')[0]; p.default = p.val = 1.2; p.normMax = 4
 
+    page = comp.appendCustomPage('UI Layer')
+    p = page.appendToggle('Uilayer', label='UI Layer')[0]; p.default = p.val = True
+    p = page.appendMenu('Chrome', label='TD Chrome')[0]
+    p.menuNames = ['editor', 'float', 'off']
+    p.menuLabels = ['Around the Editor (like TD)', 'Fade In When Used', 'Off']
+    p.default = p.val = 'editor'
+    p = page.appendFloat('Uihold', label='Hold')[0]; p.default = p.val = 2.5; p.normMax = 10
+    p = page.appendFloat('Uifade', label='Fade Time')[0]; p.default = p.val = 0.25; p.normMax = 2
+    for name, label, val in (('Showcursor', 'Cursor', True), ('Showclicks', 'Click Ripples', True),
+                             ('Showkeys', 'Keys', True), ('Showmouse', 'Mouse Buttons', True),
+                             ('Uidebug', 'Calibration Overlay', False)):
+        p = page.appendToggle(name, label=label)[0]; p.default = p.val = val
+    p = page.appendFloat('Cursorsize', label='Cursor Size')[0]; p.default = p.val = 7; p.normMax = 30
+    p = page.appendFloat('Pathbarheight', label='Path Bar Height')[0]; p.default = p.val = 28; p.normMax = 60
+    p = page.appendXY('Mousecaloffset', label='Mouse Offset')
+    p = page.appendXY('Mousecalscale', label='Mouse Scale')
+    for par_ in p:
+        par_.default = par_.val = 1
+    p = page.appendXY('Netcaloffset', label='Network Offset')
+    p = page.appendFloat('Netcalscale', label='Network Zoom Scale')[0]; p.default = p.val = 1
+
     page = comp.appendCustomPage('Render')
+    p = page.appendMenu('Cameramode', label='Camera Mode')[0]
+    p.menuNames = ['mirror', 'follow']
+    p.menuLabels = ['Mirror Editor View', 'Follow New Operators']
+    p.default = p.val = 'mirror'
     page.appendCOMP('Camera', label='Camera')
     page.appendPulse('Frameall', label='Frame All')
     p = page.appendInt('Res', label='Resolution', size=2)
     p[0].default = p[0].val = 1920
     p[1].default = p[1].val = 1080
+
+
+def _table(comp, name, rows, x, y):
+    t = comp.create(tableDAT, name)
+    t.clear()
+    for row in rows:
+        t.appendRow(list(row))
+    t.nodeX, t.nodeY = x, y
+    return t
+
+
+def _buildUILayer(comp, render):
+    """Inputs (screen grab, mouse, keyboard), the UI layer render and the
+    final composite: UI layer over the 3D render placed in the window."""
+    try:
+        grab = comp.create(screengrabTOP, 'grab')
+    except NameError:
+        # no Screen Grab TOP in this build: captured tiles and chrome stay empty
+        grab = comp.create(constantTOP, 'grab')
+    grab.nodeX, grab.nodeY = 200, 450
+    mouse = comp.create(mouseinCHOP, 'mouse')
+    mouse.nodeX, mouse.nodeY = 200, 600
+    keys = comp.create(keyboardinDAT, 'keys')
+    keys.par.callbacks = 'keys_cb'
+    keys.nodeX, keys.nodeY = 200, 750
+    _table(comp, 'regions', REGIONS, -600, -100)
+    _table(comp, 'popups', POPUPS, -600, -250)
+    _scriptOp(comp, scriptCHOP, 'ui', 'ui_cb', 400, 600)
+    _scriptOp(comp, scriptCHOP, 'tiles', 'tiles_cb', 400, 450)
+    cards = comp.create(geometryCOMP, 'ui_cards')
+    _clearChildren(cards)
+    cards.nodeX, cards.nodeY = 400, 300
+    cam = comp.create(cameraCOMP, 'cam_ui')
+    # orthographic 1 x 1 view of the window: element coordinates are window UV
+    _setparSafe(cam, 'projection', 'ortho')
+    _setparSafe(cam, 'orthowidth', 1)
+    cam.par.tx, cam.par.ty, cam.par.tz = 0.5, 0.5, 5
+    cam.nodeX, cam.nodeY = 400, 150
+    rui = comp.create(renderTOP, 'render_ui')
+    rui.par.camera = 'cam_ui'
+    rui.par.geometry = 'ui_cards'
+    rui.par.lights = ''
+    rui.par.outputresolution = 'custom'
+    rui.par.resolutionw.expr = 'parent().ext.UILayerExt.WindowSize()[0]'
+    rui.par.resolutionh.expr = 'parent().ext.UILayerExt.WindowSize()[1]'
+    _setparSafe(rui, 'bgalpha', 0)
+    rui.nodeX, rui.nodeY = 600, 300
+    place = comp.create(transformTOP, 'world_place')
+    place.inputConnectors[0].connect(render)
+    place.par.outputresolution = 'custom'
+    place.par.resolutionw.expr = 'parent().ext.UILayerExt.WindowSize()[0]'
+    place.par.resolutionh.expr = 'parent().ext.UILayerExt.WindowSize()[1]'
+    _setparSafe(place, 'extend', 'zero')
+    _setparSafe(place, 'tunit', 'fraction')
+    r = 'parent().ext.UILayerExt.WorldRect()'
+    place.par.tx.expr = '({0}[0] + {0}[2]) * 0.5 - 0.5'.format(r)
+    place.par.ty.expr = '({0}[1] + {0}[3]) * 0.5 - 0.5'.format(r)
+    place.par.sx.expr = '{0}[2] - {0}[0]'.format(r)
+    place.par.sy.expr = '{0}[3] - {0}[1]'.format(r)
+    place.nodeX, place.nodeY = 600, 100
+    over = comp.create(overTOP, 'over_ui')
+    over.inputConnectors[0].connect(rui)
+    over.inputConnectors[1].connect(place)
+    over.nodeX, over.nodeY = 800, 200
+    out = comp.create(outTOP, 'out1')
+    out.inputConnectors[0].connect(over)
+    out.nodeX, out.nodeY = 1000, 200
+
+
+def _setparSafe(o, name, value):
+    p = getattr(o.par, name, None)
+    if p is not None:
+        try:
+            p.val = value
+        except Exception:
+            pass
 
 
 def build(parentComp, scriptsDir, name='net3d'):
@@ -224,8 +353,9 @@ def build(parentComp, scriptsDir, name='net3d'):
     render.par.geometry = 'geo_slabs geo_conn geo_flags geo_wires cards'
     render.par.lights = ''
     render.par.outputresolution = 'custom'
-    render.par.resolutionw.expr = 'parent().par.Res1'
-    render.par.resolutionh.expr = 'parent().par.Res2'
+    # with the UI layer the 3D render fills the network editor's rectangle
+    render.par.resolutionw.expr = "parent().ext.UILayerExt.WorldRes()[0] if parent().par.Uilayer else parent().par.Res1"
+    render.par.resolutionh.expr = "parent().ext.UILayerExt.WorldRes()[1] if parent().par.Uilayer else parent().par.Res2"
     # order-independent transparency, so faded layers blend whatever the
     # camera angle; the parameter name differs between builds
     for pn, v in (('antialias', 'aa16x'), ('bgalpha', 1),
@@ -236,13 +366,12 @@ def build(parentComp, scriptsDir, name='net3d'):
             except Exception:
                 pass
     render.nodeX, render.nodeY = 200, 100
-    out = comp.create(outTOP, 'out1')
-    out.inputConnectors[0].connect(render)
-    out.nodeX, out.nodeY = 400, 100
+    _buildUILayer(comp, render)
 
-    # extension
+    # extensions
     comp.par.ext0object = "op('./NetGraphExt').module.NetGraphExt(me)"
     comp.par.ext0promote = True
+    comp.par.ext1object = "op('./UILayerExt').module.UILayerExt(me)"
     comp.initializeExtensions()
 
     # Target left empty = the network net3d sits in

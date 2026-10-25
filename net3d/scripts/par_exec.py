@@ -1,5 +1,5 @@
 # Parameters that change the layout or the cards
-UPDATE = ('Recurse', 'Scale', 'Layerspacing', 'Labelres', 'Viewerres', 'Previews', 'References')
+UPDATE = ('Recurse', 'Scale', 'Layerspacing', 'Labelres', 'Viewerres', 'Previews', 'References', 'Tilesource')
 
 
 def onPulse(par):

@@ -62,6 +62,9 @@ DEFAULT_COLORS = {
     'flag_display': (0.30, 0.60, 0.95),
     'flag_render':  (0.70, 0.40, 0.90),
     'flag_viewer':  (0.85, 0.85, 0.85),
+    'flag_error':   (0.90, 0.20, 0.20),
+    'flag_warning': (0.95, 0.75, 0.10),
+    'hover':        (0.75, 0.75, 0.75),
 }
 
 # Tile layout in network-editor units. Edit the 'tile' table to calibrate
@@ -243,7 +246,7 @@ class NetGraphExt:
         bx0, by0 = world(x0, y0)
         bx1, by1 = world(x1, y1)
         self.Networks[comp.path] = {
-            'level': level, 'z': oz, 'x': (bx0 + bx1) * 0.5, 'y': (by0 + by1) * 0.5,
+            'level': level, 'z': oz, 'ox': ox, 'oy': oy, 'x': (bx0 + bx1) * 0.5, 'y': (by0 + by1) * 0.5,
             'w': bx1 - bx0, 'h': by1 - by0, 'comp': parentNode,
             # the network holding the COMP node
             'parent': self.Nodes[parentNode]['path'].rsplit('/', 1)[0] if parentNode is not None else None}
@@ -312,6 +315,8 @@ class NetGraphExt:
                 'viewer': bool(getattr(o, 'viewer', False)),
                 'current': bool(getattr(o, 'current', False)),
                 'selected': bool(getattr(o, 'selected', False)),
+                'error': self._message(o, 'errors'),
+                'warning': self._message(o, 'warnings'),
                 'conns': {},
             }
             local[o.path] = len(self.Nodes)
@@ -368,6 +373,15 @@ class NetGraphExt:
                 self._scanNetwork(o, level + 1, ni, self.Nodes[ni]['rank'] + 1)
                 if len(self.Nodes) > before:
                     self._linkInOut(o, ni)
+
+    @staticmethod
+    def _message(o, kind):
+        """First line of an operator's errors() / warnings(), or ''."""
+        fn = getattr(o, kind, None)
+        try:
+            return (fn() or '').strip().split('\n')[0] if fn else ''
+        except Exception:
+            return ''
 
     def _linkInOut(self, comp, ni):
         """Wires through the hierarchy, drawn like any other wire: COMP
@@ -483,7 +497,8 @@ class NetGraphExt:
         structure = hash(tuple(
             (n['path'], n['name'], n['type'], n['tint'], n['netw'], n['neth'],
              round(n['x'], 4), round(n['y'], 4), n['bypass'], n['lock'], n['display'],
-             n['render'], n['viewer'], n['current'], n['selected']) for n in self.Nodes) +
+             n['render'], n['viewer'], n['current'], n['selected'], n['error'], n['warning'])
+            for n in self.Nodes) +
             tuple((w['a'], w['b'], w['kind']) for w in self.Wires) +
             tuple((pl['key'], pl['title'], pl['color'], round(pl['x'], 4), round(pl['y'], 4),
                    round(pl['w'], 4), round(pl['h'], 4)) for pl in self.Panels))
@@ -517,7 +532,7 @@ class NetGraphExt:
             birth = p.Birthtime.eval()
             if any(now - b < birth for b in self._born.values()):
                 self._cook()
-            if p.Follow.eval() and self._trans is None:
+            if p.Follow.eval() and self._trans is None and p.Cameramode.eval() != 'mirror':
                 self._follow(dt)
 
     def Frame(self):
@@ -537,11 +552,10 @@ class NetGraphExt:
         y1 = max(n['y'] + n['h'] * 0.5 for n in items)
         res = self.ownerComp.op('render')
         aspect = res.width / max(1, res.height)
-        fov = math.radians(cam.par.fov.eval())
         half = max((y1 - y0) * 0.5, (x1 - x0) * 0.5 / aspect) * 1.1
         cam.par.tx = (x0 + x1) * 0.5
         cam.par.ty = (y0 + y1) * 0.5
-        cam.par.tz = half / math.tan(fov * 0.5)
+        cam.par.tz = half / self.TanHalfV(aspect)
         cam.par.rx = cam.par.ry = cam.par.rz = 0
         self._camPos = None
 
@@ -620,13 +634,18 @@ class NetGraphExt:
 
     def _framePose(self, net):
         """Camera pose that shows a whole network. Inside a component the
-        camera stays behind the layer in front, so it is really 'in' it."""
+        camera stays behind the layer in front, so it is really 'in' it.
+        With Camera Mode 'mirror' a dive ends where the editor shows it."""
+        if self.ownerComp.par.Cameramode.eval() == 'mirror' and net == self._ownerPath:
+            ext = getattr(self.ownerComp.ext, 'UILayerExt', None)
+            pose = ext.MirrorPose() if ext is not None else None
+            if pose is not None:
+                return pose
         n = self.Networks[net]
         cam = self.ownerComp.op('cam')
         res = self.ownerComp.op('render')
         aspect = res.width / max(1, res.height)
-        tanh = math.tan(math.radians(cam.par.fov.eval()) * 0.5)
-        dist = max(n['h'] * 0.5, n['w'] * 0.5 / aspect) * 1.15 / tanh
+        dist = max(n['h'] * 0.5, n['w'] * 0.5 / aspect) * 1.15 / self.TanHalfV(aspect)
         if n['level'] > 0:
             dist = min(dist, (self.ownerComp.par.Layerspacing.eval() + self.ownerComp.par.Explode.eval()) * 0.85)
         z = self._netZ(net)
@@ -636,10 +655,33 @@ class NetGraphExt:
         """Camera pose right in front of the COMP tile of a network: the
         tile fills the view, the moment the editor would 'enter' it."""
         n = self.Nodes[self.Networks[net]['comp']]
-        cam = self.ownerComp.op('cam')
-        tanh = math.tan(math.radians(cam.par.fov.eval()) * 0.5)
+        res = self.ownerComp.op('render')
+        tanh = self.TanHalfV(res.width / max(1, res.height))
         z = self._netZ(self.Networks[net]['parent'])
         return (n['x'], n['y'], z + n['h'] * 0.5 / tanh * 1.1), (n['x'], n['y'], z)
+
+    def TanHalfV(self, aspect):
+        """tan of half the vertical field of view. TD cameras measure FOV
+        horizontally unless their View Angle Method says otherwise."""
+        cam = self.ownerComp.op('cam')
+        t = math.tan(math.radians(cam.par.fov.eval()) * 0.5)
+        method = getattr(cam.par, 'viewanglemethod', None)
+        vertical = method is not None and 'vert' in str(method.eval()).lower()
+        return t if vertical else t / aspect
+
+    def NetToWorld(self, net, nx, ny):
+        """Network-editor coordinates inside the network of COMP 'net' ->
+        world X/Y."""
+        n = self.Networks[net]
+        return n['ox'] + nx * self._scale, n['oy'] + ny * self._scale
+
+    def SetHover(self, path):
+        """The UI layer reports the operator under the mouse; its border
+        lights up like the editor's hover."""
+        self._hover = path
+        o = self.ownerComp.op('inst')
+        if o is not None:
+            o.cook(force=True)
 
     def _stepTransition(self):
         tr = self._trans
@@ -800,6 +842,7 @@ class NetGraphExt:
         s = self._scale
         p = self.ownerComp.par
         lres, vres = p.Labelres.eval(), p.Viewerres.eval()
+        captured = p.Tilesource.eval() == 'captured'
         wanted = {}
         for i, n in enumerate(self.Nodes):
             b, ns = tile['border'], tile['namestrip']
@@ -813,7 +856,9 @@ class NetGraphExt:
                 view=(0.0, ns * 0.5 * s, vw * s, vh * s) if vh > 4 else None,
                 name=(0.0, (-n['neth'] * 0.5 + b + ns * 0.5) * s, vw * s, ns * s),
                 viewpx=(max(8, int(vw * vres)), max(8, int(vh * vres))),
-                namepx=(max(8, int(vw * lres)), max(8, int(ns * lres)))))
+                namepx=(max(8, int(vw * lres)), max(8, int(ns * lres))),
+                # the real tile, cropped from the screen grab (see UILayerExt)
+                face=(0.0, 0.0, n['w'], n['h']) if captured else None))
         for i, pl in enumerate(self.Panels):
             netw = max(64, pl['netw'])
             neth = netw * pl['h'] / max(1e-6, pl['w'])
@@ -831,7 +876,8 @@ class NetGraphExt:
                     old.destroy()
 
         for key, (src, idx, spec) in wanted.items():
-            content = (spec['src'], spec['path'], spec['view'] is not None, spec['viewpx'], spec['namepx'])
+            content = (spec['src'], spec['path'], spec['view'] is not None, spec['viewpx'], spec['namepx'],
+                       spec.get('face') is not None)
             have = self._cards.get(key)
             if have is not None and have[1] != content:
                 old = cards.op('c{}'.format(have[0]))
@@ -859,6 +905,15 @@ class NetGraphExt:
                     mat = geo.op(part + '_mat')
                     if mat is not None:
                         mat.par.alpha.expr = "op('../../{0}')['ca'][{1}]".format(src, idx)
+                if geo.op('face') is not None:
+                    # crop follows the tile on screen; the cache holds the last
+                    # frame it was fully visible; shown once it has been seen
+                    crop = geo.op('face_src')
+                    for par_, ch in (('cropleft', 'l'), ('cropright', 'r'), ('cropbottom', 'b'), ('croptop', 't')):
+                        getattr(crop.par, par_).expr = "op('../../tiles')['{0}'][{1}]".format(ch, idx)
+                    geo.op('face').par.active.expr = "op('../../tiles')['vis'][{0}] > 0.5".format(idx)
+                    geo.op('face_mat').par.alpha.expr = (
+                        "op('../../inst')['ca'][{0}] * op('../../tiles')['got'][{0}]".format(idx))
             self._cards[key] = (cid, content, (src, idx))
 
     def _makeCard(self, cards, cid, spec):
@@ -898,10 +953,29 @@ class NetGraphExt:
             g.par.material = mat.name
             for j, o_ in enumerate((tex, mat, g)):
                 o_.nodeX, o_.nodeY = j * 200, y
+        if spec.get('face') is not None:
+            crop = geo.create(cropTOP, 'face_src')
+            crop.inputConnectors[0].connect(self.ownerComp.op('grab'))
+            cache = geo.create(cacheTOP, 'face')
+            cache.inputConnectors[0].connect(crop)
+            _setpar(cache, 'cachesize', 1)
+            mat = geo.create(constantMAT, 'face_mat')
+            mat.par.colormap = 'face'
+            _setpar(mat, 'blending', True)
+            g = geo.create(geometryCOMP, 'gface')
+            for c in list(g.children):
+                c.destroy()
+            q = g.create(selectSOP, 'quad')
+            q.par.sop = '../../../quad'
+            q.render = q.display = True
+            g.par.material = 'face_mat'
+            g.par.tz = 0.0008
+            for j, o_ in enumerate((crop, cache, mat, g)):
+                o_.nodeX, o_.nodeY = j * 200 - 200, 300
 
     def _styleCard(self, geo, spec, cols, tile):
-        for part in ('view', 'name'):
-            rect = spec[part]
+        for part in ('view', 'name', 'face'):
+            rect = spec.get(part)
             g = geo.op('g' + part)
             if rect is None or g is None:
                 continue
@@ -960,7 +1034,9 @@ class NetGraphExt:
         chans = {k: [] for k in ('tx', 'ty', 'tz', 'sx', 'sy', 'sz', 'r', 'g', 'b', 'a', 'fz', 'sc', 'ca')}
         for n, (x, y, z, s) in zip(self.Nodes, poses):
             col = n['color']
-            if hl and n['current']:
+            if hl and n['path'] == getattr(self, '_hover', None):
+                col = cols['hover']
+            elif hl and n['current']:
                 col = cols['current']
             elif hl and n['selected']:
                 col = cols['selected']
@@ -993,6 +1069,9 @@ class NetGraphExt:
             slots = (('bypass', left, top), ('lock', left, top - fh * 1.2),
                      ('display', right, top), ('render', right, top - fh * 1.2),
                      ('viewer', right, -n['h'] * 0.5 + b + fh * 0.5))
+            badge = 'error' if n['error'] else 'warning' if n['warning'] else None
+            if badge:
+                slots = slots + ((badge, right + fw, n['h'] * 0.5 + fh * 0.4),)
             for flag, fx, fy in slots:
                 if not n[flag]:
                     continue
