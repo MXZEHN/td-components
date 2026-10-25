@@ -4,9 +4,17 @@ tutorials that look like TouchDesigner itself.
 
 TouchDesigner already renders every piece of its UI, so this layer re-uses
 those pixels instead of imitating them. A Screen Grab TOP of the TD window
-('grab') is the source; everything is placed in window coordinates (u, v in
-0..1, origin bottom left, like a TOP), so a crop of the grab lands exactly
+('grab') is the source; everything is laid out in window coordinates (u, v
+in 0..1, origin bottom left, like a TOP), so a crop of the grab lands exactly
 where TD drew it.
+
+The layer itself is 3D: 'ui_cards' is a plane (window aspect x 1) filmed by
+the perspective camera 'cam_ui', which by default sits exactly where the
+plane fills the frame, so it looks flat and pixel exact. The plane can be
+moved, tilted and scaled (UI Translate / Rotate / Scale), and its sublayers
+(chrome, popups, overlays, calibration) sit UI Depth apart in Z, each scaled
+to stay exact head on, so they separate with parallax as soon as the plane
+turns.
 
   Chrome    every pane except the network editor (parameters, textport,
             palette, ...) and the regions in the 'regions' table (timeline,
@@ -385,14 +393,14 @@ class UILayerExt:
                 if used:
                     self._active[key] = self._now
                 want = 1.0 if chrome == 'editor' else float(self._triggered(key))
-                els.append({'key': key, 'kind': 'grab', 'rect': r, 'want': want})
+                els.append({'key': key, 'kind': 'grab', 'rect': r, 'want': want, 'layer': 0})
             for reg in self._regions():
                 key = 'region:' + reg['name']
                 r = reg['rect']
                 if self._inRect(mouse, r) or (reg['trigger'] in self._active and self._triggered(reg['trigger'])):
                     self._active[key] = self._now
                 want = 1.0 if chrome == 'editor' or reg['trigger'] == 'always' else float(self._triggered(key))
-                els.append({'key': key, 'kind': 'grab', 'rect': r, 'want': want})
+                els.append({'key': key, 'kind': 'grab', 'rect': r, 'want': want, 'layer': 0})
         rect = self.EditorRect()
         if chrome != 'off' and rect is not None and p.Pathbarheight.eval() > 0:
             # the editor's path bar sits inside the editor pane, over the 3D view
@@ -401,7 +409,7 @@ class UILayerExt:
             if self._inRect(mouse, r):
                 self._active['pathbar'] = self._now
             want = 1.0 if chrome == 'editor' else float(self._triggered('pathbar') or self._triggered('dive'))
-            els.append({'key': 'pathbar', 'kind': 'grab', 'rect': r, 'want': want})
+            els.append({'key': 'pathbar', 'kind': 'grab', 'rect': r, 'want': want, 'layer': 0})
         if self._popup is not None:
             pop = self._popupSizes().get(self._popup['kind'])
             if pop is not None:
@@ -409,7 +417,7 @@ class UILayerExt:
                 u0 = self._popup['u'] + pop['dx'] / w
                 v1 = self._popup['v'] + pop['dy'] / h
                 r = (u0, v1 - pop['h'] / h, u0 + pop['w'] / w, v1)
-                els.append({'key': 'popup', 'kind': 'grab', 'rect': r, 'want': 1.0})
+                els.append({'key': 'popup', 'kind': 'grab', 'rect': r, 'want': 1.0, 'layer': 1})
             if self._now - self._popup['t0'] > 20:
                 self._popup = None
         if p.Showcursor.eval() and mouse is not None:
@@ -483,7 +491,7 @@ class UILayerExt:
             a, b = self.NetToWindow(n['nx'], n['ny']), self.NetToWindow(n['nx'] + n['netw'], n['ny'] + n['neth'])
             if a and b:
                 els.append({'key': 'dbg:' + n['path'], 'kind': 'rect', 'rect': (a[0], a[1], b[0], b[1]),
-                            'want': 0.35, 'color': (1.0, 0.2, 0.6)})
+                            'want': 0.35, 'color': (1.0, 0.2, 0.6), 'layer': 3})
         return els
 
     def _regions(self):
@@ -565,7 +573,7 @@ class UILayerExt:
             geo = cards.op('u{}'.format(have[0]))
             self._style(geo, e, w, h)
             if have[2] != i:
-                for par_, ch in (('tx', 'tx'), ('ty', 'ty'), ('sx', 'sx'), ('sy', 'sy')):
+                for par_, ch in (('tx', 'tx'), ('ty', 'ty'), ('tz', 'tz'), ('sx', 'sx'), ('sy', 'sy')):
                     getattr(geo.par, par_).expr = "op('../ui')['{0}'][{1}]".format(ch, i)
                 geo.op('mat').par.alpha.expr = "op('../../ui')['a'][{0}]".format(i)
             self._cards[key] = (have[0], sig, i)
@@ -623,16 +631,34 @@ class UILayerExt:
 
     # ---- cook callbacks ---------------------------------------------
 
+    def UICamDistance(self):
+        """Distance at which the UI plane (height 1) fills cam_ui's frame."""
+        cam = self.ownerComp.op('cam_ui')
+        w, h = self.WindowSize()
+        t = math.tan(math.radians(cam.par.fov.eval() if cam is not None else 45.0) * 0.5)
+        method = getattr(cam.par, 'viewanglemethod', None) if cam is not None else None
+        tv = t if method is not None and 'vert' in str(method.eval()).lower() else t / (w / h)
+        return 0.5 / tv
+
     def CookUI(self, scriptOp):
-        """Element centres and sizes in window UV (the UI camera is an
-        orthographic 1 x 1 view of the window) and opacity."""
-        chans = {k: [] for k in ('tx', 'ty', 'sx', 'sy', 'a')}
+        """Element placement on the UI plane: window UV -> plane X/Y
+        (centred, window aspect x 1), Z by sublayer. An element lifted by z
+        towards the camera is shrunk by (D - z) / D around the frame centre,
+        so head on it still covers exactly its window pixels."""
+        w, h = self.WindowSize()
+        aspect = w / h
+        dist = self.UICamDistance()
+        gap = self.ownerComp.par.Uidepth.eval()
+        chans = {k: [] for k in ('tx', 'ty', 'tz', 'sx', 'sy', 'a')}
         for e in self.Elements:
             r = e['rect']
-            chans['tx'].append((r[0] + r[2]) * 0.5)
-            chans['ty'].append((r[1] + r[3]) * 0.5)
-            chans['sx'].append(r[2] - r[0])
-            chans['sy'].append(r[3] - r[1])
+            z = e.get('layer', 2) * gap
+            k = (dist - z) / dist
+            chans['tx'].append(((r[0] + r[2]) * 0.5 - 0.5) * aspect * k)
+            chans['ty'].append(((r[1] + r[3]) * 0.5 - 0.5) * k)
+            chans['tz'].append(z)
+            chans['sx'].append((r[2] - r[0]) * aspect * k)
+            chans['sy'].append((r[3] - r[1]) * k)
             chans['a'].append(e['alpha'])
         scriptOp.clear()
         n = len(self.Elements)

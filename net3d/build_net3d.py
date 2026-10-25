@@ -151,6 +151,13 @@ def _customPars(comp):
     p = page.appendFloat('Reveal', label='Reveal')[0]; p.default = p.val = 1; p.clampMin = p.clampMax = True
     p = page.appendFloat('Explode', label='Explode')[0]; p.default = p.val = 0; p.normMax = 5
     p = page.appendFloat('Layeropacity', label='Layer Opacity')[0]; p.default = p.val = 0.35; p.clampMin = p.clampMax = True
+    p = page.appendMenu('Annotations', label='Annotations')[0]
+    p.menuNames = ['typewriter', 'static']
+    p.menuLabels = ['Type On First Approach', 'Static']
+    p.default = p.val = 'typewriter'
+    p = page.appendFloat('Typespeed', label='Type Speed')[0]; p.default = p.val = 30; p.normMax = 120
+    p = page.appendFloat('Approach', label='Approach')[0]; p.default = p.val = 0.2; p.clampMin = p.clampMax = True
+    page.appendPulse('Retype', label='Retype Annotations')
     p = page.appendFloat('Frontopacity', label='Front Opacity')[0]; p.default = p.val = 0.08; p.clampMin = p.clampMax = True
     p = page.appendFloat('Focuslevel', label='Focus Level')[0]; p.default = p.val = 0; p.normMax = 4
 
@@ -180,6 +187,10 @@ def _customPars(comp):
         p = page.appendToggle(name, label=label)[0]; p.default = p.val = val
     p = page.appendFloat('Cursorsize', label='Cursor Size')[0]; p.default = p.val = 7; p.normMax = 30
     p = page.appendFloat('Pathbarheight', label='Path Bar Height')[0]; p.default = p.val = 28; p.normMax = 60
+    page.appendXYZ('Uitranslate', label='UI Translate')
+    page.appendXYZ('Uirotate', label='UI Rotate')
+    p = page.appendFloat('Uiscale', label='UI Scale')[0]; p.default = p.val = 1
+    p = page.appendFloat('Uidepth', label='UI Depth')[0]; p.default = p.val = 0.03; p.normMax = 0.5
     p = page.appendXY('Mousecaloffset', label='Mouse Offset')
     p = page.appendXY('Mousecalscale', label='Mouse Scale')
     for par_ in p:
@@ -229,11 +240,17 @@ def _buildUILayer(comp, render):
     cards = comp.create(geometryCOMP, 'ui_cards')
     _clearChildren(cards)
     cards.nodeX, cards.nodeY = 400, 300
+    # the UI layer is a plane in 3D; by default its camera sits exactly where
+    # the plane fills the frame, so it looks flat and pixel exact
+    p = 'parent().par.'
+    for axis in 'xyz':
+        getattr(cards.par, 't' + axis).expr = p + 'Uitranslate' + axis
+        getattr(cards.par, 'r' + axis).expr = p + 'Uirotate' + axis
+        getattr(cards.par, 's' + axis).expr = p + 'Uiscale'
     cam = comp.create(cameraCOMP, 'cam_ui')
-    # orthographic 1 x 1 view of the window: element coordinates are window UV
-    _setparSafe(cam, 'projection', 'ortho')
-    _setparSafe(cam, 'orthowidth', 1)
-    cam.par.tx, cam.par.ty, cam.par.tz = 0.5, 0.5, 5
+    cam.par.fov = 45
+    cam.par.tx, cam.par.ty = 0, 0
+    cam.par.tz.expr = 'parent().ext.UILayerExt.UICamDistance()'
     cam.nodeX, cam.nodeY = 400, 150
     rui = comp.create(renderTOP, 'render_ui')
     rui.par.camera = 'cam_ui'

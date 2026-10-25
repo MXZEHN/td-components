@@ -1,5 +1,5 @@
 # Parameters that change the layout or the cards
-UPDATE = ('Recurse', 'Scale', 'Layerspacing', 'Labelres', 'Viewerres', 'Previews', 'References', 'Tilesource')
+UPDATE = ('Recurse', 'Scale', 'Layerspacing', 'Labelres', 'Viewerres', 'Previews', 'References', 'Tilesource', 'Annotations')
 
 
 def onPulse(par):
@@ -8,6 +8,8 @@ def onPulse(par):
         ext.Rebuild()
     elif par.name == 'Frameall':
         ext.Frame()
+    elif par.name == 'Retype':
+        ext.RetypeAnnotations()
     return
 
 

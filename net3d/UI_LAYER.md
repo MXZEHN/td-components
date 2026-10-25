@@ -27,8 +27,35 @@ out1 = over( UI layer , 3D world placed in the window )
 | **World** (`render`) | 3D | Node slabs with their **real tiles** (cropped from the grab), bezier wires (also across levels and for references), annotations, frames, hover/current border, error and warning badges (drawn fallback). |
 | **UI** (`render_ui`) | 2D, window UV, always on top | TD chrome as crops of the grab (panes, timeline, menu bar, path bar), popups as crops at the point they open, overlays (cursor, ripples, mouse buttons, keys). |
 
-The UI layer works in window coordinates (u, v in 0..1, origin bottom left), so a crop of the grab lands exactly
-where TD drew it. An orthographic 1 x 1 camera (`cam_ui`) renders it.
+### The UI layer is a 3D layer with 2D logic
+
+Everything on the UI layer is laid out in window coordinates (u, v in 0..1, origin bottom left), so a crop of
+the grab lands exactly where TD drew it. The layer itself is a **plane in 3D** (`ui_cards`, window aspect x 1),
+filmed by its own perspective camera `cam_ui`:
+
+- **Default:** `cam_ui` sits at the distance where the plane fills the frame, so it looks flat and pixel exact.
+- **UI Translate / Rotate / Scale** move, tilt and scale the plane, e.g. to swing the whole UI away when diving
+  into a component, or to fly it in at the start of a tutorial.
+- **Sublayers:** chrome, popups, overlays and calibration sit **UI Depth** apart in Z. Each is shrunk by
+  `(D - z) / D` around the frame centre, so straight on it still covers exactly its window pixels, at any UI
+  Depth (verified to 0.000 px). When the plane turns, they separate with parallax: popups float above the panes
+  and the cursor floats above both.
+
+The layout logic never changes; only the plane moves.
+
+```
+cam_ui ──> [ overlays   z = 2 x gap ]   cursor, ripples, keys, mouse buttons
+           [ popups     z = 1 x gap ]   context menu, OP Create, info
+           [ chrome     z = 0       ]   panes, timeline, menu bar, path bar
+```
+
+### Annotations type themselves
+
+In the world layer, annotations (title, then body) **type out, typewriter style, the first time the camera
+comes close**: the annotation's centre is in view and it fills at least **Approach** of the frame's height. They
+type at **Type Speed** characters per second, pausing a little after punctuation and line breaks, with a blinking
+caret. Then they stay complete for the rest of the session (or until **Retype Annotations**). Text added while
+editing types on from where it was; other edits just appear.
 
 ## Camera modes
 

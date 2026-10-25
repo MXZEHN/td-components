@@ -149,6 +149,7 @@ class NetGraphExt:
         self._ownerPath = None   # network the editor (or Dive) is showing
         self._chain = set()      # that network and its ancestors: always scanned
         self._trans = None       # running dive / surface transition
+        self._typed = {}         # annotation path -> typewriter state
 
     # ---- helpers ---------------------------------------------------
 
@@ -275,19 +276,15 @@ class NetGraphExt:
 
         for a in notes:
             wx, wy = world(a.nodeX, a.nodeY)
-            title = ''
-            for pn_ in ('Titletext', 'Title', 'Text'):
-                par = getattr(a.par, pn_, None)
-                if par is not None:
-                    title = str(par.eval())
-                    break
+            title = self._parText(a, ('Titletext', 'Title'))
+            body = self._parText(a, ('Bodytext', 'Body', 'Text'))
             color = cols['annotate']
             if all(hasattr(a.par, n) for n in ('Backcolorr', 'Backcolorg', 'Backcolorb')):
                 color = (a.par.Backcolorr.eval(), a.par.Backcolorg.eval(), a.par.Backcolorb.eval())
             elif tuple(round(c, 3) for c in a.color) != DEFAULT_NODE_COLOR:
                 color = tuple(a.color)
             self.Panels.append({
-                'key': a.path, 'title': title, 'kind': 'annotate', 'level': level,
+                'key': a.path, 'title': title, 'body': body, 'kind': 'annotate', 'level': level,
                 'x': wx + a.nodeWidth * s * 0.5, 'y': wy + a.nodeHeight * s * 0.5,
                 'w': a.nodeWidth * s, 'h': a.nodeHeight * s, 'netw': a.nodeWidth,
                 'z': oz, 'color': color,
@@ -373,6 +370,14 @@ class NetGraphExt:
                 self._scanNetwork(o, level + 1, ni, self.Nodes[ni]['rank'] + 1)
                 if len(self.Nodes) > before:
                     self._linkInOut(o, ni)
+
+    @staticmethod
+    def _parText(o, names):
+        for name in names:
+            par = getattr(o.par, name, None)
+            if par is not None:
+                return str(par.eval())
+        return ''
 
     @staticmethod
     def _message(o, kind):
@@ -463,6 +468,7 @@ class NetGraphExt:
         self._born = {}
         self._raw = {}
         self._focus = None
+        self._typed = {}
         self.Update(force=True)
         self._camPos = None
         render = self.ownerComp.op('render')
@@ -527,6 +533,8 @@ class NetGraphExt:
                 self.Dive(owner)
         if self._trans is not None:
             self._stepTransition()
+        if p.Annotations.eval() == 'typewriter':
+            self._typeStep()
         if live:
             # keep cooking while operators are still growing in
             birth = p.Birthtime.eval()
@@ -562,6 +570,88 @@ class NetGraphExt:
     def Focus(self, path):
         """Make the live camera fly to the operator at path."""
         self._focus = path
+
+    # ---- annotations: typewriter -----------------------------------
+
+    @staticmethod
+    def _fullText(pl):
+        return pl['title'] + ('\n\n' + pl['body'] if pl.get('body') else '')
+
+    def _panelText(self, pl):
+        """What a panel shows right now: frames their title, annotations
+        their text as far as it has been typed."""
+        if pl['kind'] != 'annotate' or self.ownerComp.par.Annotations.eval() != 'typewriter':
+            return self._fullText(pl) if pl['kind'] == 'annotate' else pl['title']
+        st = self._typed.get(pl['key'])
+        return st['shown'] if st else ''
+
+    def RetypeAnnotations(self):
+        """Forget which annotations have been typed; they type again on
+        the next approach."""
+        self._typed = {}
+        self.Update(force=True)
+
+    def _typeStep(self):
+        """Annotations type themselves out the first time the camera comes
+        close enough (centre in view, at least Approach of the frame high),
+        then stay. Text added later while editing types on from where it
+        was; other edits just show."""
+        p = self.ownerComp.par
+        ui_ = getattr(self.ownerComp.ext, 'UILayerExt', None)
+        speed = max(1.0, p.Typespeed.eval())
+        now = absTime.seconds
+        explode = p.Explode.eval()
+        for i, pl in enumerate(self.Panels):
+            if pl['kind'] != 'annotate':
+                continue
+            full = self._fullText(pl)
+            st = self._typed.get(pl['key'])
+            if st is None:
+                st = self._typed[pl['key']] = {'t0': None, 'text': full, 'shown': None, 'from': 0}
+            if st['text'] != full:
+                # edited while on screen: keep typing appended text, show the rest
+                st['from'] = len(st['text']) if full.startswith(st['text']) else len(full)
+                st['text'], st['t0'] = full, (now if st['t0'] is not None else None)
+            if st['t0'] is None:
+                z = pl['z'] - explode * pl['level']
+                if ui_ is None or self._approached(ui_, pl, z, p.Approach.eval()):
+                    st['t0'] = now
+            n = st['from'] if st['t0'] is None else self._typedCount(full, st['from'], (now - st['t0']) * speed)
+            caret = '_' if st['t0'] is not None and n < len(full) and int(now * 3) % 2 == 0 else ''
+            shown = full[:n] + caret
+            if shown != st['shown']:
+                st['shown'] = shown
+                card = self._cards.get('panel:' + pl['key'])
+                geo = self.ownerComp.op('cards').op('c{}'.format(card[0])) if card else None
+                if geo is not None:
+                    geo.op('name').par.text = shown
+
+    @staticmethod
+    def _typedCount(text, start, ticks):
+        """Characters typed after 'ticks' character-durations, starting at
+        'start': punctuation and line breaks pause like a typist would."""
+        n = start
+        while n < len(text):
+            ch = text[n]
+            cost = 6.0 if ch == '\n' else 4.0 if ch in '.!?' else 2.0 if ch in ',;:' else 1.0
+            if ticks < cost:
+                break
+            ticks -= cost
+            n += 1
+        return n
+
+    @staticmethod
+    def _approached(ui_, pl, z, approach):
+        """The panel's centre is in the frame and its top-to-bottom height
+        on screen is at least 'approach' of the frame."""
+        c = ui_.ProjectWorld((pl['x'], pl['y'], z))
+        top = ui_.ProjectWorld((pl['x'], pl['y'] + pl['h'] * 0.5, z))
+        bot = ui_.ProjectWorld((pl['x'], pl['y'] - pl['h'] * 0.5, z))
+        if c is None or top is None or bot is None:
+            return False
+        r = ui_.WorldRect()
+        inside = r[0] <= c[0] <= r[2] and r[1] <= c[1] <= r[3]
+        return inside and (top[1] - bot[1]) / max(1e-6, r[3] - r[1]) >= approach
 
     # ---- diving in and out of components ---------------------------
 
@@ -863,7 +953,7 @@ class NetGraphExt:
             netw = max(64, pl['netw'])
             neth = netw * pl['h'] / max(1e-6, pl['w'])
             wanted['panel:' + pl['key']] = ('notes', i, dict(
-                panel=True, path='', src='', text=pl['title'], label='', strip=pl['color'],
+                panel=True, path='', src='', text=self._panelText(pl), label='', strip=pl['color'],
                 iconbg=pl['color'], bypass=False, view=None,
                 name=(0.0, 0.0, pl['w'], pl['h']), viewpx=None,
                 namepx=(max(8, int(netw * lres * 0.5)), max(8, int(neth * lres * 0.5)))))
@@ -990,6 +1080,7 @@ class NetGraphExt:
         _setpar(name, 'bgcolorr', bg[0]); _setpar(name, 'bgcolorg', bg[1]); _setpar(name, 'bgcolorb', bg[2])
         _setpar(name, 'bgalpha', 1)
         if spec['panel']:
+            _setpar(name, 'wordwrap', True)
             _setpar(name, 'fontsizex', tile['titlesize'] * res * 0.5)
             _setpar(name, 'alignx', 'left')
             _setpar(name, 'aligny', 'top')

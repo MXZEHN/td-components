@@ -79,6 +79,10 @@ design and calibration.
 | Reveal | 1 | 0..1. Nodes grow in by rank (longest path from a source), wires grow from output to input |
 | Explode | 0 | Pushes the hierarchy levels further apart: `Explode x level` extra in Z |
 | Layer Opacity | 0.35 | Opacity per level *behind* Focus Level (`0.35^distance`) |
+| Annotations | Type On First Approach | Annotations type out their title and body, typewriter style, the first time the camera comes close (then stay), or are always shown in full |
+| Type Speed | 30 | Characters per second; punctuation and line breaks pause a little longer |
+| Approach | 0.2 | How close counts as an approach: the annotation's centre is in view and it is at least this fraction of the frame high |
+| Retype Annotations | pulse | Forget which annotations have been typed |
 | Front Opacity | 0.08 | Opacity per level *in front of* Focus Level, i.e. the parents when you are inside a component |
 | Focus Level | 0 | Hierarchy level drawn solid. Live mode animates it while diving; you can also animate it yourself |
 
@@ -130,6 +134,8 @@ Call `op('net3d').Dive('/project1/fx')` to run the same move from a script, for 
 | Cursor, Click Ripples, Keys, Mouse Buttons | on | Overlays |
 | Calibration Overlay | off | Predicted tile rectangles over the grab, for calibrating |
 | Cursor Size, Path Bar Height | 7, 28 | Pixels |
+| UI Translate / Rotate / Scale | 0 / 0 / 1 | Moves the UI layer's plane in 3D; at the defaults it fills the frame exactly |
+| UI Depth | 0.03 | Z gap between the UI's sublayers (chrome, popups, overlays, calibration); they separate with parallax when the plane turns |
 | Mouse Offset / Scale, Network Offset / Zoom Scale | 0 / 1 | Calibration of the screen <-> network mapping |
 
 Tables: `regions` (timeline, menu bar, ... in window UV) and `popups` (menu sizes in pixels).
