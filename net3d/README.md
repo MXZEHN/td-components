@@ -8,8 +8,8 @@ and keeps its position and size:
 - a name strip along the bottom
 - a family-coloured border, with the current and selected operators highlighted
 - its lit flags: bypass, lock, display, render, viewer active Connectors and
-curved wires are drawn like the editor's, and annotations appear as panels. Nested networks are stacked along X,
-each in its own titled frame and linked back to its COMP.
+curved wires are drawn like the editor's, and annotations appear as panels. Nested networks are stacked in depth:
+each sits behind its COMP node in its own titled frame, linked back to the COMP.
 
 Everything is driven by parameters, so you can animate it:
 
@@ -49,7 +49,7 @@ Everything is driven by parameters, so you can animate it:
 | Scale | 0.01 | World units per network-editor unit (a default node is about 1.3 x 0.9) |
 | Node Depth | 0.12 | Thickness of the node slabs |
 | Wire Width / Segments | 0.035 / 32 | Wire ribbon width and smoothness |
-| Network Gap | 2 | X gap between stacked networks |
+| Layer Spacing | 4 | Z distance from a COMP node back to its network |
 | Hierarchy Links | on | Draw the dashed links between a COMP and its network |
 | TOP Previews | All Operators | What fills each tile's viewer area: live viewers for all operators, TOPs only, only operators with Viewer Active on, or none (operator type labels) |
 | Viewer Resolution | 2 | Pixels per network unit for the live viewers |
@@ -127,12 +127,12 @@ Bypassed tiles are dimmed.
 
 ### Hierarchy
 
-The target network keeps its own editor coordinates, so editing it live doesn't shift what is already there.
-With Recurse Depth above 0, each nested network, depth first, takes the next slot to the right. Each one is
-vertically centred on its COMP node and drawn inside a frame titled with its path. Dashed links connect the
-hierarchy:
+The target network keeps its own editor coordinates at z = 0, so editing it live doesn't shift what is already
+there. With Recurse Depth above 0, each nested network sits Layer Spacing further back than its COMP node,
+centred behind it and drawn inside a frame titled with its path. Two levels down is 2 x Layer Spacing back, and
+so on. Dashed links connect the hierarchy:
 
-- COMP node -> its frame
+- COMP tile corners -> its frame's corners, so the network reads as the COMP opened up behind it
 - COMP input *i* -> the In OP behind it
 - Out OP -> COMP output *i*
 
@@ -144,7 +144,9 @@ Reveal treats a nested network as coming after its COMP, so it grows in after it
 - A live viewer for every operator costs one OP Viewer TOP each. On big networks use TOPs Only, or lower the
   Viewer Resolution.
 - COMPs show their panel through the OP Viewer TOP, which is empty for a Base COMP.
-- A nested network's slot moves when an earlier network grows, so in Live mode with recursion, frames to the
-  right can shift.
+- Sibling COMPs that sit close together have networks that overlap in X/Y on the same layer. Spread the COMPs
+  apart in the editor, or increase Explode.
+- Seen straight on from the front, the deeper layers are hidden behind the top network. Orbit the camera or use
+  Explode to see them.
 - Wires that leave the scanned networks (to a COMP outside the target) are not drawn.
 - Each node is a few operators (`cards`), so rebuilding very large networks (hundreds of nodes) is slow.

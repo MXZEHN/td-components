@@ -6,11 +6,11 @@ position and size from the network editor, its family, flags and wiring, and
 lays the result out in world space: 1 network unit = Scale world units, the
 network's +Y stays +Y, nodes face +Z.
 
-Hierarchy is stacked along X: the target network keeps its own coordinates,
-each nested network (depth first) gets the next slot to the right, centred
-vertically on its COMP node, inside a titled frame. Hierarchy links join a
-COMP to its network: COMP input -> In OP, Out OP -> COMP output, and a link
-from the COMP to the frame.
+Hierarchy is stacked in Z: the target network keeps its own coordinates and
+sits at z = 0; each nested network sits Layer Spacing further back than its
+COMP node, centred behind it, inside a titled frame. Hierarchy links join a
+COMP to its network: the COMP tile's corners to the frame's corners, COMP
+input -> In OP, and Out OP -> COMP output.
 
 Rendering is data-driven so it can be animated:
   inst      Script CHOP, one sample per node -> instanced node slabs
@@ -189,10 +189,9 @@ class NetGraphExt:
         self._cols = self.Colors()
         self._tile = self.Tile()
         self._scale = p.Scale.eval()
-        self._gap = p.Networkgap.eval()
+        self._layer = p.Layerspacing.eval()
         self._maxLevel = int(p.Recurse.eval())
         self._previews = p.Previews.eval()
-        self._cursorX = 0.0
         target = self._target()
         if target is None or not target.isCOMP:
             debug('net3d: Target is not a COMP')
@@ -213,19 +212,19 @@ class NetGraphExt:
         if parentNode is None:
             # the target keeps its own coordinates so live edits do not
             # shift everything that is already there
-            ox, oy = 0.0, 0.0
+            ox, oy, oz = 0.0, 0.0, 0.0
         else:
-            # next slot along X, vertically centred on the COMP node
+            # one layer further back, centred behind the COMP node
             pn = self.Nodes[parentNode]
-            ox = self._cursorX + FRAME_PAD * s - x0 * s
+            ox = pn['x'] - (x0 + x1) * 0.5 * s
             oy = pn['y'] - (y0 + y1) * 0.5 * s
+            oz = pn['z'] - self._layer
 
         def world(nx, ny):
             return ox + nx * s, oy + ny * s
 
         fx0, fy0 = world(x0 - FRAME_PAD, y0 - FRAME_PAD)
         fx1, fy1 = world(x1 + FRAME_PAD, y1 + FRAME_PAD)
-        self._cursorX = max(self._cursorX, fx1 + self._gap)
         cols = self._cols
 
         if self._maxLevel > 0:
@@ -233,13 +232,18 @@ class NetGraphExt:
                 'key': 'frame:' + comp.path, 'title': comp.path, 'kind': 'frame',
                 'x': (fx0 + fx1) * 0.5, 'y': (fy0 + fy1) * 0.5,
                 'w': fx1 - fx0, 'h': fy1 - fy0, 'netw': (x1 - x0) + FRAME_PAD * 2,
-                'color': cols['frame'],
+                'z': oz, 'color': cols['frame'],
             })
             if parentNode is not None:
+                # the COMP tile's corners fan out to its network's frame
                 pn = self.Nodes[parentNode]
-                self.Wires.append({
-                    'a': (parentNode, pn['w'] * 0.5, 0.0), 'b': (None, fx0, (fy0 + fy1) * 0.5),
-                    'rs': pn['rank'], 'rd': baseRank, 'kind': 'hier', 'color': cols['hier']})
+                for cx, cy in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+                    fx = fx0 if cx < 0 else fx1
+                    fy = fy0 if cy < 0 else fy1
+                    self.Wires.append({
+                        'a': (parentNode, cx * pn['w'] * 0.5, cy * pn['h'] * 0.5),
+                        'b': (None, fx, fy, oz - self.ownerComp.par.Depth.eval() * 2.5),
+                        'rs': pn['rank'], 'rd': baseRank, 'kind': 'hier', 'color': cols['hier']})
 
         for a in notes:
             wx, wy = world(a.nodeX, a.nodeY)
@@ -258,7 +262,7 @@ class NetGraphExt:
                 'key': a.path, 'title': title, 'kind': 'annotate',
                 'x': wx + a.nodeWidth * s * 0.5, 'y': wy + a.nodeHeight * s * 0.5,
                 'w': a.nodeWidth * s, 'h': a.nodeHeight * s, 'netw': a.nodeWidth,
-                'color': color,
+                'z': oz, 'color': color,
             })
 
         first = len(self.Nodes)
@@ -272,7 +276,7 @@ class NetGraphExt:
                 'path': o.path, 'name': o.name, 'type': o.OPType, 'label': _typeLabel(o),
                 'family': fam, 'level': level, 'rank': baseRank,
                 'nx': o.nodeX, 'ny': o.nodeY,
-                'x': wx + o.nodeWidth * s * 0.5, 'y': wy + o.nodeHeight * s * 0.5, 'z': 0.0,
+                'x': wx + o.nodeWidth * s * 0.5, 'y': wy + o.nodeHeight * s * 0.5, 'z': oz,
                 'w': o.nodeWidth * s, 'h': o.nodeHeight * s,
                 'netw': o.nodeWidth, 'neth': o.nodeHeight,
                 'color': cols.get(fam, cols['COMP']), 'tint': tint, 'custom': custom,
@@ -776,7 +780,7 @@ class NetGraphExt:
         chans = {k: [] for k in ('tx', 'ty', 'fz', 'fx', 'fy')}
         for pl in self.Panels:
             chans['tx'].append(pl['x']); chans['ty'].append(pl['y'])
-            chans['fz'].append(-depth * (2.5 if pl['kind'] == 'frame' else 1.5))
+            chans['fz'].append(pl['z'] - depth * (2.5 if pl['kind'] == 'frame' else 1.5))
             chans['fx'].append(pl['w']); chans['fy'].append(pl['h'])
         self._writeChop(scriptOp, chans, len(self.Panels))
 
@@ -817,9 +821,9 @@ class NetGraphExt:
         scriptOp.primAttribs.create('Cd', (1.0, 1.0, 1.0, 1.0))
 
         def end(e):
-            ni, dx, dy = e
+            ni, dx, dy = e[:3]
             if ni is None:
-                return (dx, dy, -depth * 0.5)
+                return (dx, dy, e[3])
             x, y, z, s = poses[ni]
             return (x + dx * s, y + dy * s, z - depth * 0.5)
 
@@ -857,8 +861,12 @@ class NetGraphExt:
             a = pts[max(0, i - 1)]
             b = pts[min(len(pts) - 1, i + 1)]
             tx, ty = b[0] - a[0], b[1] - a[1]
-            ln = math.hypot(tx, ty) or 1.0
-            nx, ny = -ty / ln * half, tx / ln * half
+            ln = math.hypot(tx, ty)
+            if ln < 1e-6:
+                # running straight back in Z: keep the ribbon facing the camera
+                nx, ny = half, 0.0
+            else:
+                nx, ny = -ty / ln * half, tx / ln * half
             pl = scriptOp.appendPoint(); pl.P = (pt[0] + nx, pt[1] + ny, pt[2])
             pr = scriptOp.appendPoint(); pr.P = (pt[0] - nx, pt[1] - ny, pt[2])
             left.append(pl); right.append(pr)
