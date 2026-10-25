@@ -83,6 +83,9 @@ DEFAULT_NODE_COLOR = (0.55, 0.55, 0.55)
 # padding around a nested network's frame, in network units
 FRAME_PAD = 60
 
+# opacity of frames and annotations, before the layer fade
+PANEL_ALPHA = {'frame': 0.5, 'annotate': 0.6}
+
 
 def _clamp(v, lo=0.0, hi=1.0):
     return lo if v < lo else hi if v > hi else v
@@ -227,23 +230,24 @@ class NetGraphExt:
         fx1, fy1 = world(x1 + FRAME_PAD, y1 + FRAME_PAD)
         cols = self._cols
 
-        if self._maxLevel > 0:
+        if parentNode is not None:
+            # nested networks get a frame; the target's would be an opaque
+            # wall hiding every layer behind it
             self.Panels.append({
-                'key': 'frame:' + comp.path, 'title': comp.path, 'kind': 'frame',
+                'key': 'frame:' + comp.path, 'title': comp.path, 'kind': 'frame', 'level': level,
                 'x': (fx0 + fx1) * 0.5, 'y': (fy0 + fy1) * 0.5,
                 'w': fx1 - fx0, 'h': fy1 - fy0, 'netw': (x1 - x0) + FRAME_PAD * 2,
                 'z': oz, 'color': cols['frame'],
             })
-            if parentNode is not None:
-                # the COMP tile's corners fan out to its network's frame
-                pn = self.Nodes[parentNode]
-                for cx, cy in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
-                    fx = fx0 if cx < 0 else fx1
-                    fy = fy0 if cy < 0 else fy1
-                    self.Wires.append({
-                        'a': (parentNode, cx * pn['w'] * 0.5, cy * pn['h'] * 0.5),
-                        'b': (None, fx, fy, oz - self.ownerComp.par.Depth.eval() * 2.5),
-                        'rs': pn['rank'], 'rd': baseRank, 'kind': 'hier', 'color': cols['hier']})
+            # the COMP tile's corners fan out to its network's frame
+            pn = self.Nodes[parentNode]
+            for cx, cy in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+                fx = fx0 if cx < 0 else fx1
+                fy = fy0 if cy < 0 else fy1
+                self.Wires.append({
+                    'a': (parentNode, cx * pn['w'] * 0.5, cy * pn['h'] * 0.5),
+                    'b': (None, fx, fy, oz - self.ownerComp.par.Depth.eval() * 2.5),
+                    'rs': pn['rank'], 'rd': baseRank, 'kind': 'hier', 'color': cols['hier']})
 
         for a in notes:
             wx, wy = world(a.nodeX, a.nodeY)
@@ -259,7 +263,7 @@ class NetGraphExt:
             elif tuple(round(c, 3) for c in a.color) != DEFAULT_NODE_COLOR:
                 color = tuple(a.color)
             self.Panels.append({
-                'key': a.path, 'title': title, 'kind': 'annotate',
+                'key': a.path, 'title': title, 'kind': 'annotate', 'level': level,
                 'x': wx + a.nodeWidth * s * 0.5, 'y': wy + a.nodeHeight * s * 0.5,
                 'w': a.nodeWidth * s, 'h': a.nodeHeight * s, 'netw': a.nodeWidth,
                 'z': oz, 'color': color,
@@ -511,6 +515,12 @@ class NetGraphExt:
 
     # ---- animation -------------------------------------------------
 
+    def LayerAlpha(self, level):
+        """Opacity of a hierarchy level: Layer Opacity per level away from
+        Focus Level, so the layer in focus is solid and the others fade."""
+        p = self.ownerComp.par
+        return p.Layeropacity.eval() ** abs(level - p.Focuslevel.eval())
+
     def Layout(self):
         """Current animated pose per node: list of (x, y, z, s) where s is
         the reveal/birth scale 0..1, and per-wire growth 0..1."""
@@ -637,6 +647,11 @@ class NetGraphExt:
                 geo.par.tz.expr = "{0}['fz'][{1}]".format(ref, idx)
                 for sp in ('sx', 'sy', 'sz'):
                     getattr(geo.par, sp).expr = "{0}['sc'][{1}]".format(ref, idx)
+                # deeper layers fade; the MATs sit one network further down
+                for part in ('view', 'name'):
+                    mat = geo.op(part + '_mat')
+                    if mat is not None:
+                        mat.par.alpha.expr = "op('../../{0}')['ca'][{1}]".format(src, idx)
             self._cards[key] = (cid, content, (src, idx))
 
     def _makeCard(self, cards, cid, spec):
@@ -666,6 +681,7 @@ class NetGraphExt:
             _setpar(tex, 'resolutionh', ph)
             mat = geo.create(constantMAT, part + '_mat')
             mat.par.colormap = tex.name
+            _setpar(mat, 'blending', True)
             g = geo.create(geometryCOMP, 'g' + part)
             for c in list(g.children):
                 c.destroy()
@@ -725,8 +741,8 @@ class NetGraphExt:
     # ---- cook callbacks (Script CHOP / SOP) ------------------------
 
     def CookInst(self, scriptOp):
-        """Node slabs (tx ty tz sx sy sz r g b) and card placement
-        (fz = face depth, sc = reveal/birth scale). The slab is the tile's
+        """Node slabs (tx ty tz sx sy sz r g b a) and card placement
+        (fz = face depth, sc = reveal/birth scale, ca = card opacity). The slab is the tile's
         border: family colour, or the highlight for the current/selected
         operator."""
         p = self.ownerComp.par
@@ -734,7 +750,7 @@ class NetGraphExt:
         cols = self._cols
         hl = p.Highlight.eval()
         poses, _ = self.Layout()
-        chans = {k: [] for k in ('tx', 'ty', 'tz', 'sx', 'sy', 'sz', 'r', 'g', 'b', 'fz', 'sc')}
+        chans = {k: [] for k in ('tx', 'ty', 'tz', 'sx', 'sy', 'sz', 'r', 'g', 'b', 'a', 'fz', 'sc', 'ca')}
         for n, (x, y, z, s) in zip(self.Nodes, poses):
             col = n['color']
             if hl and n['current']:
@@ -744,6 +760,11 @@ class NetGraphExt:
             chans['tx'].append(x); chans['ty'].append(y); chans['tz'].append(z - depth * 0.5)
             chans['sx'].append(n['w'] * s); chans['sy'].append(n['h'] * s); chans['sz'].append(depth * max(s, 1e-4))
             chans['r'].append(col[0]); chans['g'].append(col[1]); chans['b'].append(col[2])
+            # the slab fades faster than the card on it, so a faded tile
+            # reads as its viewer rather than a block of family colour
+            alpha = self.LayerAlpha(n['level'])
+            chans['a'].append(alpha ** 2)
+            chans['ca'].append(alpha)
             chans['fz'].append(z + 0.001)
             chans['sc'].append(max(s, 1e-4))
         self._writeChop(scriptOp, chans, len(self.Nodes))
@@ -757,7 +778,7 @@ class NetGraphExt:
         sc = self._scale
         fw, fh, b = tile['flagw'] * sc, tile['flagh'] * sc, tile['border'] * sc
         poses, _ = self.Layout()
-        chans = {k: [] for k in ('tx', 'ty', 'tz', 'sx', 'sy', 'sz', 'r', 'g', 'b')}
+        chans = {k: [] for k in ('tx', 'ty', 'tz', 'sx', 'sy', 'sz', 'r', 'g', 'b', 'a')}
         for n, (x, y, z, s) in zip(self.Nodes, poses):
             top = n['h'] * 0.5 - b - fh * 0.5
             left = -n['w'] * 0.5 + b + fw * 0.5
@@ -772,13 +793,17 @@ class NetGraphExt:
                 chans['tx'].append(x + fx * s); chans['ty'].append(y + fy * s); chans['tz'].append(z + 0.002)
                 chans['sx'].append(fw * s); chans['sy'].append(fh * s); chans['sz'].append(depth * 0.1 * max(s, 1e-4))
                 chans['r'].append(col[0]); chans['g'].append(col[1]); chans['b'].append(col[2])
+                chans['a'].append(self.LayerAlpha(n['level']))
         self._writeChop(scriptOp, chans, len(chans['tx']))
 
     def CookNotes(self, scriptOp):
         """Frames and annotations: flat panels behind the nodes."""
         depth = self.ownerComp.par.Depth.eval()
-        chans = {k: [] for k in ('tx', 'ty', 'fz', 'fx', 'fy')}
+        chans = {k: [] for k in ('tx', 'ty', 'fz', 'fx', 'fy', 'sc', 'ca')}
         for pl in self.Panels:
+            chans['sc'].append(1.0)
+            # panels are see-through so they never hide nodes pushed behind them
+            chans['ca'].append(self.LayerAlpha(pl['level']) * PANEL_ALPHA[pl['kind']])
             chans['tx'].append(pl['x']); chans['ty'].append(pl['y'])
             chans['fz'].append(pl['z'] - depth * (2.5 if pl['kind'] == 'frame' else 1.5))
             chans['fx'].append(pl['w']); chans['fy'].append(pl['h'])
@@ -790,7 +815,7 @@ class NetGraphExt:
         depth = p.Depth.eval()
         size = self._tile['conn'] * self._scale
         poses, _ = self.Layout()
-        chans = {k: [] for k in ('tx', 'ty', 'tz', 'sx', 'sy', 'sz', 'r', 'g', 'b')}
+        chans = {k: [] for k in ('tx', 'ty', 'tz', 'sx', 'sy', 'sz', 'r', 'g', 'b', 'a')}
         for c in self.Conns:
             col = self.Nodes[c['node']]['color']
             x, y, z, s = poses[c['node']]
@@ -798,6 +823,7 @@ class NetGraphExt:
             chans['tz'].append(z - depth * 0.5)
             chans['sx'].append(size * s); chans['sy'].append(size * s); chans['sz'].append(depth * 1.2 * max(s, 1e-4))
             chans['r'].append(col[0] * 0.8); chans['g'].append(col[1] * 0.8); chans['b'].append(col[2] * 0.8)
+            chans['a'].append(self.LayerAlpha(self.Nodes[c['node']]['level']))
         self._writeChop(scriptOp, chans, len(self.Conns))
 
     @staticmethod
@@ -850,7 +876,11 @@ class NetGraphExt:
                 k0, k1, k2, k3 = u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t
                 pts.append(tuple(k0 * p0[j] + k1 * p1[j] + k2 * p2[j] + k3 * p3[j] for j in range(3)))
             kind = w['kind']
-            self._ribbon(scriptOp, pts, width * (0.6 if kind == 'hier' else 1.0), w['color'],
+            levels = [self.Nodes[e[0]]['level'] for e in (w['a'], w['b']) if e[0] is not None]
+            if w['b'][0] is None:
+                levels.append(max(levels) + 1)
+            alpha = min(self.LayerAlpha(lv) for lv in levels)
+            self._ribbon(scriptOp, pts, width * (0.6 if kind == 'hier' else 1.0), w['color'] + (alpha,),
                          dashed=kind == 'hier')
 
     @staticmethod
@@ -878,4 +908,4 @@ class NetGraphExt:
             poly[1].point = right[i]
             poly[2].point = right[i + 1]
             poly[3].point = left[i + 1]
-            poly.Cd = (col[0], col[1], col[2], 1.0)
+            poly.Cd = (col[0], col[1], col[2], col[3])

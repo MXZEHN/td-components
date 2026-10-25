@@ -62,6 +62,8 @@ Everything is driven by parameters, so you can animate it:
 | --- | --- | --- |
 | Reveal | 1 | 0..1. Nodes grow in by rank (longest path from a source), wires grow from output to input |
 | Explode | 0 | Pushes each node back by `Explode x rank` in Z |
+| Layer Opacity | 0.35 | Opacity per hierarchy level away from Focus Level (`0.35^distance`) |
+| Focus Level | 0 | Hierarchy level drawn solid; animate it to dive from a COMP into its network |
 
 **Live**
 
@@ -104,7 +106,7 @@ Operators that get a custom colour in the editor use it for their name strip.
 | --- | --- |
 | `NetGraphExt` | Extension: scans the network, ranks nodes, computes the animated layout and cooks the script ops |
 | `nodes` | Table of the last scan (path, family, rank, position, size), useful for your own animation |
-| `inst` / `conn` / `notes` | Script CHOPs: per-node slab, connector and panel (frame, annotation) transforms and colours |
+| `inst` / `conn` / `notes` | Script CHOPs: per-node slab, connector and panel (frame, annotation) transforms, colours and opacity (`a` slab, `ca` card) |
 | `geo_slabs`, `geo_conn` | Instanced boxes from `inst` and `conn` |
 | `wires` -> `geo_wires` | Script SOP of bezier ribbons coloured by the source node's family, plus dashed hierarchy links |
 | `flags` -> `geo_flags` | Script CHOP of lit flags, instanced as tabs |
@@ -137,6 +139,12 @@ so on. Dashed links connect the hierarchy:
 - Out OP -> COMP output *i*
 
 Reveal treats a nested network as coming after its COMP, so it grows in after it.
+
+Deeper layers are semi-transparent: each level away from **Focus Level** multiplies its opacity by **Layer
+Opacity**. A tile's slab fades faster than its viewer (opacity squared), so a faded tile still reads as its
+image. Frames (0.5) and annotations (0.6) are always see-through, so they never hide nodes that Explode pushes
+behind them. The top network has no frame. Blending is on for all MATs, and the Render TOP's order-independent
+transparency is switched on when the build exposes it.
 
 ## Known gaps
 

@@ -90,6 +90,8 @@ def _instancedGeo(comp, name, sop, chop, mat, x, y):
             getattr(geo.par, prefix + 'r').val = 'r'
             getattr(geo.par, prefix + 'g').val = 'g'
             getattr(geo.par, prefix + 'b').val = 'b'
+            if hasattr(geo.par, prefix + 'a'):
+                getattr(geo.par, prefix + 'a').val = 'a'
             break
     geo.nodeX, geo.nodeY = x, y
     return geo
@@ -118,6 +120,8 @@ def _customPars(comp):
     page = comp.appendCustomPage('Animate')
     p = page.appendFloat('Reveal', label='Reveal')[0]; p.default = p.val = 1; p.clampMin = p.clampMax = True
     p = page.appendFloat('Explode', label='Explode')[0]; p.default = p.val = 0; p.normMax = 5
+    p = page.appendFloat('Layeropacity', label='Layer Opacity')[0]; p.default = p.val = 0.35; p.clampMin = p.clampMax = True
+    p = page.appendFloat('Focuslevel', label='Focus Level')[0]; p.default = p.val = 0; p.normMax = 4
 
     page = comp.appendCustomPage('Live')
     p = page.appendToggle('Live', label='Live')[0]; p.default = p.val = False
@@ -189,6 +193,7 @@ def build(parentComp, scriptsDir, name='net3d'):
 
     # materials: flat like the editor
     mat = comp.create(constantMAT, 'flat')
+    mat.par.blending = True
     mat.nodeX, mat.nodeY = -200, -350
 
     # geometry
@@ -216,7 +221,10 @@ def build(parentComp, scriptsDir, name='net3d'):
     render.par.outputresolution = 'custom'
     render.par.resolutionw.expr = 'parent().par.Res1'
     render.par.resolutionh.expr = 'parent().par.Res2'
-    for pn, v in (('antialias', 'aa16x'), ('bgalpha', 1)):
+    # order-independent transparency, so faded layers blend whatever the
+    # camera angle; the parameter name differs between builds
+    for pn, v in (('antialias', 'aa16x'), ('bgalpha', 1),
+                  ('orderindtrans', True), ('transparency', 'orderindependent')):
         if hasattr(render.par, pn):
             try:
                 getattr(render.par, pn).val = v
