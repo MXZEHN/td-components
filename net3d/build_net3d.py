@@ -36,6 +36,9 @@ COLORS = [
     ('text', 0.90, 0.90, 0.90),
     ('bypass', 0.35, 0.35, 0.35),
     ('annotate', 0.30, 0.30, 0.30),
+    ('type', 0.60, 0.60, 0.60),
+    ('frame', 0.25, 0.25, 0.25),
+    ('hier', 0.80, 0.80, 0.80),
 ]
 
 
@@ -89,7 +92,8 @@ def _customPars(comp):
     p = page.appendFloat('Connsize', label='Connector Size')[0]; p.default = p.val = 0.08; p.normMax = 0.3
     p = page.appendFloat('Wirewidth', label='Wire Width')[0]; p.default = p.val = 0.035; p.normMax = 0.2
     p = page.appendInt('Wiresegs', label='Wire Segments')[0]; p.default = p.val = 32; p.normMax = 64
-    p = page.appendFloat('Layerspacing', label='Layer Spacing')[0]; p.default = p.val = 6; p.normMax = 20
+    p = page.appendFloat('Networkgap', label='Network Gap')[0]; p.default = p.val = 2; p.normMax = 10
+    p = page.appendToggle('Hierlinks', label='Hierarchy Links')[0]; p.default = p.val = True
     p = page.appendMenu('Previews', label='TOP Previews')[0]
     p.menuNames = ['viewer', 'all', 'none']
     p.menuLabels = ['Viewer Flag', 'All TOPs', 'None']
@@ -99,6 +103,16 @@ def _customPars(comp):
     page = comp.appendCustomPage('Animate')
     p = page.appendFloat('Reveal', label='Reveal')[0]; p.default = p.val = 1; p.clampMin = p.clampMax = True
     p = page.appendFloat('Explode', label='Explode')[0]; p.default = p.val = 0; p.normMax = 5
+
+    page = comp.appendCustomPage('Live')
+    p = page.appendToggle('Live', label='Live')[0]; p.default = p.val = False
+    p = page.appendInt('Livepoll', label='Poll Every N Frames')[0]; p.default = p.val = 3; p.normMin = 1; p.normMax = 30
+    p = page.appendFloat('Birthtime', label='Birth Time')[0]; p.default = p.val = 0.6; p.normMax = 3
+    p = page.appendToggle('Follow', label='Camera Follows')[0]; p.default = p.val = True
+    p = page.appendXYZ('Followoffset', label='Follow Offset')
+    for par_, v in zip(p, (0.6, -0.4, 3.0)):
+        par_.default = par_.val = v
+    p = page.appendFloat('Followsmooth', label='Follow Smooth')[0]; p.default = p.val = 0.5; p.normMax = 3
 
     page = comp.appendCustomPage('Render')
     page.appendCOMP('Camera', label='Camera')

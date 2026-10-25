@@ -1,4 +1,5 @@
-REBUILD = ('Target', 'Recurse', 'Scale', 'Layerspacing', 'Labelres', 'Previews')
+# Parameters that change the layout or the cards
+UPDATE = ('Recurse', 'Scale', 'Networkgap', 'Labelres', 'Previews')
 
 
 def onPulse(par):
@@ -11,6 +12,9 @@ def onPulse(par):
 
 
 def onValueChange(par, prev):
-    if par.name in REBUILD:
-        parent().ext.NetGraphExt.Rebuild()
+    ext = parent().ext.NetGraphExt
+    if par.name == 'Target':
+        ext.Rebuild()
+    elif par.name in UPDATE:
+        ext.Update(force=True)
     return
