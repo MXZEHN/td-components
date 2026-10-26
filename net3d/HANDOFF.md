@@ -77,7 +77,17 @@ typing on, and a UI layer (TD's panes, menus, popups, mouse, clicks, keys) on to
   - The grey full-frame gradient seen in TDMCP grid captures is not in the render (190 frames scanned).
   - Known differences: a connected input tab stays dark (template shows the unconnected look); non-default
     node sizes stretch the template.
-  - Still to test: dives, UI layer (ripples, keys, UI Rotate), performance.
+  - Dives verified in TD (editor into `fx`, into `glow` below Recurse Depth, back to the top): focus level and
+    layer fades as designed. Fixed: the parent level stayed half-visible in front of the network you were in
+    (user screenshot); levels in front now show only during a dive and leave the render half a second after.
+  - TOP viewers get a solid viewer-black letterbox (the highlight slab showed through it). COMPs without a
+    panel or 3D content show `OP.icon` ('Bas') in bold Verdana like the editor.
+  - UI layer verified with injected keys and clicks: key display, ripples, mouse buttons, cursor, UI Rotate. A
+    ghost of the world render appears for a frame or two right after a setting change, then settles.
+  - Performance with 202 operators and 40 references: Live mode went from 35 to 60 fps. Reference lines are
+    one strip each with a repeating dot texture (`refs` Script SOP, `refdots`) instead of ~25,000 dot ribbons,
+    and cook on their own while pulses run; the reference scan runs every 30 frames or when operators change.
+  - Step 5 done. Next: step 6, export net3d.tox and net3d_standalone.tox like cam_nav.
 - Still open:
   - Drawn tiles use a simpler model than TD 2025 (family border all round vs. TD's family column with flag
     icons and a grey frame; live viewers vs. type labels; current operator filled vs. outlined; COMPs flat grey).

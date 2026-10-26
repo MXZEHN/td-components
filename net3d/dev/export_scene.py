@@ -88,7 +88,7 @@ class AnyPar:
 class TOp:
     def __init__(s, kind, name, parent):
         s.kind, s.name, s.parentop, s.par, s.kids = kind, name, parent, AnyPar(), {}
-        s.inputConnectors = [types.SimpleNamespace(connect=lambda o: None)]
+        s.inputConnectors = [types.SimpleNamespace(connect=lambda o: None) for _ in range(2)]
         s.nodeX = s.nodeY = 0; s.render = s.display = False
     @property
     def children(s): return list(s.kids.values())
@@ -98,7 +98,7 @@ class TOp:
     def store(s, k, v): s.__dict__.setdefault('_store', {})[k] = v
     def fetch(s, k, d=None): return s.__dict__.get('_store', {}).get(k, d)
 for k in ('geometryCOMP', 'selectTOP', 'fitTOP', 'textTOP', 'constantMAT', 'selectSOP', 'opviewerTOP',
-          'cropTOP', 'cacheTOP', 'circleTOP', 'constantTOP'):
+          'cropTOP', 'cacheTOP', 'circleTOP', 'constantTOP', 'overTOP'):
     setattr(builtins, k, type(k, (), {}))
 cards = TOp('geometryCOMP', 'cards', None)
 cam = types.SimpleNamespace(par=Par(tx=0.0, ty=0.0, tz=10.0, rx=0, ry=0, rz=0, fov=45))
@@ -117,6 +117,7 @@ class ScriptOp:
     def clear(s): s.chans = {}; s.points = []; s.polys = []
     def appendChan(s, n): c = types.SimpleNamespace(vals=None); s.chans[n] = c; return c
     primAttribs = types.SimpleNamespace(create=lambda *a: None)
+    vertexAttribs = types.SimpleNamespace(create=lambda *a: None)
     def appendPoint(s):
         p = types.SimpleNamespace(P=None); s.points.append(p); return p
     def appendPoly(s, n, closed, addPoints):

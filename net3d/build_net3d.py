@@ -23,6 +23,7 @@ SCRIPTS = {
     'conn_cb': 'conn_cb.py',
     'flags_cb': 'flags_cb.py',
     'wires_cb': 'wires_cb.py',
+    'refs_cb': 'refs_cb.py',
     'quad_cb': 'quad_cb.py',
     'frame_exec': 'frame_exec.py',
     'par_exec': 'par_exec.py',
@@ -536,7 +537,29 @@ def build(parentComp, scriptsDir, name='net3d'):
 
     render = comp.create(renderTOP, 'render')
     render.par.camera.expr = "parent().par.Camera.eval() or op('cam')"
-    render.par.geometry = 'geo_slabs geo_conn geo_flags geo_wires cards'
+    # reference lines: one strip each, the dots from a repeating texture
+    _scriptOp(comp, scriptSOP, 'refs', 'refs_cb', -400, -500)
+    dots = comp.create(rectangleTOP, 'refdots')
+    dots.par.outputresolution = 'custom'
+    dots.par.resolutionw, dots.par.resolutionh = 16, 4
+    _setparSafe(dots, 'sizeunit', 'fraction')
+    _setparSafe(dots, 'centerunit', 'fraction')
+    dots.par.sizex, dots.par.sizey = 0.5, 1.0
+    dots.par.centerx, dots.par.centery = -0.25, 0.0
+    _setparSafe(dots, 'antialias', False)
+    dots.nodeX, dots.nodeY = -200, -650
+    rmat = comp.create(constantMAT, 'refdots_mat')
+    rmat.par.colormap = 'refdots'
+    rmat.par.blending = True
+    rmat.nodeX, rmat.nodeY = 0, -650
+    gr = comp.create(geometryCOMP, 'geo_refs')
+    _clearChildren(gr)
+    sel = gr.create(selectSOP, 'in')
+    sel.par.sop = '../refs'
+    sel.render = sel.display = True
+    gr.par.material = rmat.name
+    gr.nodeX, gr.nodeY = 200, -650
+    render.par.geometry = 'geo_slabs geo_conn geo_flags geo_wires geo_refs cards'
     render.par.lights = ''
     render.par.outputresolution = 'custom'
     # with the UI layer the 3D render fills the network editor's rectangle

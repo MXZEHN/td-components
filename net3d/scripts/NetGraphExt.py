@@ -36,6 +36,7 @@ script.
 """
 
 import math
+import os
 import re
 
 # Network editor colours measured on TD 2025.33230. build() fills the 'colors'
@@ -126,6 +127,8 @@ CARD_LIFT = 0.006
 FACE_LIFT = 0.004
 # font of operator names, like the editor's name strip
 NAME_FONT = 'Consolas'
+# bold type label on tiles without a viewer ('Lvl', 'Bas')
+LABEL_FONT_FILE = 'C:/Windows/Fonts/verdanab.ttf'
 # viewer and name above the tile template on a card
 DRAWN_LIFT = 0.002
 # coloured rim around a highlighted tile (current, selected, hover), network units
@@ -150,9 +153,16 @@ REF_FOCUS = 'ref|'
 PULSE_SPEED = 0.6
 PULSE_COUNT = 3
 PULSE_LEN = 0.07
+PULSE_MAX = 20      # network units: short dashes on long references too
 # references drawn like the editor: dots and gaps of REF_DOT, an arrowhead
 # of REF_ARROW halfway (network units)
 REF_DOT = 2
+# levels in front of the one in focus (the parents, inside a component)
+# show only during a dive, then fade out in this many seconds
+FRONT_FADE = 0.5
+# in Live mode references are rescanned (every parameter of every operator)
+# this often, and at once when operators come or go
+REF_SCAN_FRAMES = 30
 REF_ARROW = 12
 # parameter tags: line height and character width in network units, fade time
 TAG_LINE = 22
@@ -184,7 +194,11 @@ def _setpar(o, name, value):
 
 
 def _typeLabel(o):
-    """'noiseTOP' -> 'Noise'."""
+    """The label the editor writes on a tile without a viewer: the
+    operator's icon text ('Lvl', 'Noi', 'Bas'), else 'noiseTOP' -> 'Noise'."""
+    icon = getattr(o, 'icon', None)
+    if isinstance(icon, str) and icon:
+        return icon
     t = o.OPType
     if t.endswith(o.family):
         t = t[:-len(o.family)]
@@ -216,6 +230,10 @@ class NetGraphExt:
         self._ownerPath = None   # network the editor (or Dive) is showing
         self._chain = set()      # that network and its ancestors: always scanned
         self._trans = None       # running dive / surface transition
+        self._transEnd = -1e9    # when the last one finished
+        self._refCache = []      # (source path, target path, parameters) of the last reference scan
+        self._refScanAt = None   # frame of that scan
+        self._refPaths = ()      # operators it covered
         self._typed = {}         # annotation path -> typewriter state
         self._wireBorn = {}      # reference wire key -> time it appeared
         self._refT0 = 0.0        # when the camera started framing a new reference
@@ -311,7 +329,7 @@ class NetGraphExt:
         self._scanNetwork(target, 0, None, 0)
         self._targetPath = target.path
         if p.References.eval():
-            self._linkReferences()
+            self._linkReferences(self._refScanDue())
             if p.Paramtags.eval() != 'off':
                 self._addTags()
 
@@ -396,6 +414,8 @@ class NetGraphExt:
             n = {
                 'path': o.path, 'name': o.name, 'type': o.OPType, 'label': _typeLabel(o),
                 'family': fam, 'level': level, 'rank': baseRank,
+                # COMPs with something to show: panels and 3D objects
+                'visual': bool(getattr(o, 'isPanel', False) or getattr(o, 'isObject', False)),
                 'nx': o.nodeX, 'ny': o.nodeY,
                 'x': wx + o.nodeWidth * s * 0.5, 'y': wy + o.nodeHeight * s * 0.5, 'z': oz,
                 'w': o.nodeWidth * s, 'h': o.nodeHeight * s,
@@ -512,12 +532,36 @@ class NetGraphExt:
                                'rs': sn['rank'], 'rd': n['rank'] + 1, 'kind': 'out', 'color': sn['color'],
                                'src': si, 'dst': ni})
 
-    def _linkReferences(self):
+    def _refScanDue(self):
+        """A full reference scan reads every parameter of every operator:
+        do it every REF_SCAN_FRAMES and when operators came or went."""
+        paths = tuple(n['path'] for n in self.Nodes)
+        return (self._refScanAt is None or paths != self._refPaths
+                or absTime.frame - self._refScanAt >= REF_SCAN_FRAMES)
+
+    def _refWire(self, si, di):
+        sn, dn = self.Nodes[si], self.Nodes[di]
+        # centre to centre, behind the tiles, like the editor
+        w = {'a': (si, 0.0, 0.0), 'b': (di, 0.0, 0.0),
+             'rs': sn['rank'], 'rd': dn['rank'], 'kind': 'ref',
+             'color': sn['color'], 'src': si, 'dst': di,
+             'key': ('ref', sn['path'], dn['path']), 'pars': []}
+        self.Wires.append(w)
+        return w
+
+    def _linkReferences(self, full=True):
         """References between scanned operators, on any level, drawn as
-        dotted wires from the referenced operator to the one referencing
+        dotted lines from the referenced operator to the one referencing
         it: OP parameters (a Select TOP's TOP, a Geometry COMP's material),
         expressions and binds naming an operator (op('null_lfo')['chan1'])
-        and CHOP exports. Each wire lists the parameters it drives."""
+        and CHOP exports. Each wire lists the parameters it drives. Between
+        full scans the last result is reused."""
+        if not full:
+            for sp, dp, pars in self._refCache:
+                si, di = self._index.get(sp), self._index.get(dp)
+                if si is not None and di is not None:
+                    self._refWire(si, di)['pars'] = list(pars)
+            return
         wired = {(w['src'], w['dst']): w for w in self.Wires if 'src' in w}
         for di, o in enumerate(self._ops):
             pars = getattr(o, 'pars', None)
@@ -534,19 +578,15 @@ class NetGraphExt:
                         continue
                     w = wired.get((si, di))
                     if w is None:
-                        sn, dn = self.Nodes[si], self.Nodes[di]
-                        # centre to centre, behind the tiles, like the editor
-                        w = {'a': (si, 0.0, 0.0), 'b': (di, 0.0, 0.0),
-                             'rs': sn['rank'], 'rd': dn['rank'], 'kind': 'ref',
-                             'color': sn['color'], 'src': si, 'dst': di,
-                             'key': ('ref', sn['path'], dn['path']), 'pars': []}
-                        self.Wires.append(w)
-                        wired[(si, di)] = w
+                        w = wired[(si, di)] = self._refWire(si, di)
                     if w['kind'] != 'ref':
                         continue
                     entry = (getattr(par, 'label', None) or getattr(par, 'name', ''), chan)
                     if entry not in w['pars']:
                         w['pars'].append(entry)
+        self._refCache = [(w['key'][1], w['key'][2], list(w['pars'])) for w in self.Wires if w['kind'] == 'ref']
+        self._refScanAt = absTime.frame
+        self._refPaths = tuple(n['path'] for n in self.Nodes)
 
     @staticmethod
     def _parSources(o, par):
@@ -629,6 +669,7 @@ class NetGraphExt:
         self._cards = {}
         self._born = {}
         self._raw = {}
+        self._refScanAt = None
         self._wireBorn = {}
         self._scanned = False
         self._panelKeys = set()
@@ -726,6 +767,9 @@ class NetGraphExt:
                 self.Dive(owner)
         if self._trans is not None:
             self._stepTransition()
+        elif now - self._transEnd < FRONT_FADE + 0.1:
+            # the parents fading out after a dive
+            self._cook()
         if p.Annotations.eval() == 'typewriter':
             self._typeStep()
         if live:
@@ -734,7 +778,7 @@ class NetGraphExt:
             if any(now - b < birth for b in self._born.values()):
                 self._cook()
             elif self._refsMoving(now):
-                for name in ('wires', 'notes'):
+                for name in ('refs', 'notes'):
                     o = self.ownerComp.op(name)
                     if o is not None:
                         o.cook(force=True)
@@ -1002,6 +1046,7 @@ class NetGraphExt:
             self._setCam(pos, look)
             self._setFocusLevel(self.Networks[tr['hops'][-1][1]]['level'])
             self._trans = None
+            self._transEnd = absTime.seconds
             self._camPos = None   # follow picks up from here
             self._chain = self._chainOf(self._ownerPath)
             return
@@ -1106,12 +1151,19 @@ class NetGraphExt:
 
     def LayerAlpha(self, level):
         """Opacity of a hierarchy level: the level in focus is solid,
-        each level behind it multiplies by Layer Opacity, each level in
-        front of it (the parents, when you are inside a component) by
-        Front Opacity."""
+        each level behind it multiplies by Layer Opacity. Levels in front of
+        it (the parents, when you are inside a component) sit between the
+        camera and the network: they show at Front Opacity only while a
+        dive passes through them, then fade out."""
         p = self.ownerComp.par
         d = level - p.Focuslevel.eval()
-        return p.Layeropacity.eval() ** d if d >= 0 else p.Frontopacity.eval() ** -d
+        if d >= 0:
+            return p.Layeropacity.eval() ** d
+        if self._trans is not None:
+            fade = 1.0
+        else:
+            fade = _clamp(1.0 - (absTime.seconds - self._transEnd) / FRONT_FADE)
+        return p.Frontopacity.eval() ** -d * fade
 
     def Layout(self):
         """Current animated pose per node: list of (x, y, z, s) where s is
@@ -1127,6 +1179,9 @@ class NetGraphExt:
             s = _smooth(r - n['rank'] * 2)
             if birth is not None:
                 s *= _smooth((self._now - self._born.get(n['path'], -1e9)) / birth)
+            if self.LayerAlpha(n['level']) < 1e-3:
+                # a hidden level leaves the render: nothing transparent in front
+                s = 0.0
             # every operator of a component shares its depth
             poses.append((n['x'], n['y'], n['z'] - explode * n['level'], s))
         grow = []
@@ -1146,7 +1201,7 @@ class NetGraphExt:
     # ---- outputs ---------------------------------------------------
 
     def _cook(self):
-        for name in ('inst', 'flags', 'notes', 'conn', 'wires'):
+        for name in ('inst', 'flags', 'notes', 'conn', 'wires', 'refs'):
             o = self.ownerComp.op(name)
             if o is not None:
                 o.cook(force=True)
@@ -1174,6 +1229,9 @@ class NetGraphExt:
             return 'icon'
         if n['family'] == 'TOP':
             return 'top'
+        if n['family'] == 'COMP' and not n.get('visual'):
+            # a Base COMP has no viewer: the editor writes its type there
+            return 'icon'
         if mode == 'tops':
             return 'icon'
         return 'op' if _OPVIEWER is not None else 'icon'
@@ -1368,10 +1426,24 @@ class NetGraphExt:
             if part == 'view' and spec['src'] == 'top':
                 sel = geo.create(selectTOP, 'view_src')
                 sel.par.top = spec['path']
-                tex = geo.create(fitTOP, 'view')
-                tex.inputConnectors[0].connect(sel)
-                _setpar(tex, 'fit', 'fitbest')
-                sel.nodeX, sel.nodeY = -200, y
+                fit = geo.create(fitTOP, 'view_fit')
+                fit.inputConnectors[0].connect(sel)
+                _setpar(fit, 'fit', 'fitbest')
+                # the letterbox is solid viewer black, like the editor's,
+                # instead of transparent with the slab showing through
+                back = geo.create(constantTOP, 'view_bg')
+                col = spec['iconbg']
+                _setpar(back, 'colorr', col[0]); _setpar(back, 'colorg', col[1]); _setpar(back, 'colorb', col[2])
+                for o_ in (fit, back):
+                    _setpar(o_, 'outputresolution', 'custom')
+                    _setpar(o_, 'resolutionw', pw)
+                    _setpar(o_, 'resolutionh', ph)
+                tex = geo.create(overTOP, 'view')
+                tex.inputConnectors[0].connect(fit)
+                tex.inputConnectors[1].connect(back)
+                sel.nodeX, sel.nodeY = -600, y
+                fit.nodeX, fit.nodeY = -400, y
+                back.nodeX, back.nodeY = -400, y - 120
             elif part == 'view' and spec['src'] == 'op':
                 tex = geo.create(_OPVIEWER, 'view')
                 _setpar(tex, 'opviewer', spec['path'])
@@ -1465,6 +1537,12 @@ class NetGraphExt:
             tc = cols['type']
             bg = cols['bypass'] if spec['bypass'] else spec['iconbg']
             view.par.text = spec['label']
+            # the editor writes the type in a bold sans; the Text TOP's Bold
+            # toggle has no effect on Verdana, its bold file does
+            _setpar(view, 'font', 'Verdana')
+            _setpar(view, 'bold', True)
+            if os.path.isfile(LABEL_FONT_FILE):
+                _setpar(view, 'fontfile', LABEL_FONT_FILE)
             _setpar(view, 'fontsizex', tile['typesize'] * self.ownerComp.par.Viewerres.eval())
             _setpar(view, 'alignx', 'center')
             _setpar(view, 'aligny', 'center')
@@ -1557,7 +1635,7 @@ class NetGraphExt:
         explode = self.ownerComp.par.Explode.eval()
         chans = {k: [] for k in ('tx', 'ty', 'fz', 'fx', 'fy', 'sc', 'ca')}
         for pl in self.Panels:
-            chans['sc'].append(1.0)
+            chans['sc'].append(1.0 if self.LayerAlpha(pl['level']) >= 1e-3 else 1e-4)
             # panels are see-through so they never hide nodes pushed behind them
             chans['ca'].append(self.LayerAlpha(pl['level']) * PANEL_ALPHA[pl['kind']] * self._tagAlpha(pl))
             chans['tx'].append(pl['x']); chans['ty'].append(pl['y'])
@@ -1621,7 +1699,6 @@ class NetGraphExt:
         explode = p.Explode.eval()
         show = {'in': p.Hierlinks.eval(), 'out': p.Hierlinks.eval(), 'frame': p.Framelinks.eval()}
         poses, grow = self.Layout()
-        pulses = p.Refpulses.eval() and p.Live.eval()
         scriptOp.clear()
         scriptOp.primAttribs.create('Cd')
 
@@ -1638,8 +1715,7 @@ class NetGraphExt:
                 continue
             p0, p3 = end(w['a']), end(w['b'])
             if kind == 'ref':
-                self._refLine(scriptOp, p0, p3, g, w, pulses)
-                continue
+                continue   # CookRefs
             # handle length grows with the distance, in depth too
             dx = abs(p3[0] - p0[0])
             dz = abs(p3[2] - p0[2])
@@ -1678,6 +1754,27 @@ class NetGraphExt:
             frame = kind == 'frame'
             self._ribbon(scriptOp, pts, width * (0.5 if frame else 1.0), w['color'] + (alpha,), dashed=frame)
 
+    def CookRefs(self, scriptOp):
+        """Reference lines on their own Script SOP: they animate every frame
+        while pulses run, the other wires only change with the network. One
+        strip per reference textured with the 'refdots' dots, the arrowhead
+        and the pulses."""
+        p = self.ownerComp.par
+        depth, explode = p.Depth.eval(), p.Explode.eval()
+        pulses = p.Refpulses.eval() and p.Live.eval()
+        scriptOp.clear()
+        scriptOp.primAttribs.create('Cd')
+        scriptOp.vertexAttribs.create('uv')
+        poses, grow = self.Layout()
+
+        def end(e):
+            x, y, z, s_ = poses[e[0]]
+            return (x + e[1] * s_, y + e[2] * s_, z - depth * 0.5)
+
+        for w, g in zip(self.Wires, grow):
+            if w['kind'] == 'ref' and g > 0.0:
+                self._refLine(scriptOp, end(w['a']), end(w['b']), g, w, pulses)
+
     def _refLine(self, scriptOp, p0, p3, g, w, pulses):
         """A reference as the editor draws it: a straight dotted line from
         the referenced operator's centre to the one using it, behind the
@@ -1694,12 +1791,10 @@ class NetGraphExt:
         def at(t):
             return tuple(p0[k] + u[k] * t for k in range(3))
 
-        dot, width = REF_DOT * s, REF_DOT * s
-        line = tuple(cols['refline']) + (alpha,)
-        end, t = g * length, 0.0
-        while t < end:
-            self._ribbon(scriptOp, [at(t), at(min(t + dot, end))], width, line)
-            t += dot * 2
+        width = REF_DOT * s
+        # the dots are the texture: one repeat per dot and gap
+        self._strip(scriptOp, at(0.0), at(g * length), width, tuple(cols['refline']) + (alpha,),
+                    0.0, g * length / (REF_DOT * 2 * s))
         if g * length >= length * 0.5 + REF_ARROW * s * 0.5:
             # arrowhead halfway, across the line in the network plane
             size = REF_ARROW * s
@@ -1715,13 +1810,33 @@ class NetGraphExt:
             poly = scriptOp.appendPoly(3, closed=True, addPoints=False)
             for i, c in enumerate(corners):
                 poly[i].point = c
+                poly[i].uv = (0.25, 0.5, 0.0)     # inside a dot: solid
             poly.Cd = tuple(cols['refarrow']) + (alpha,)
         if pulses and g >= 1.0:
             # light running from the source to the parameter it drives
             bright = tuple(min(1.0, c * 1.9) for c in cols['refarrow']) + (alpha,)
             for k in range(PULSE_COUNT):
                 t0 = ((self._now * PULSE_SPEED + k / PULSE_COUNT) % 1.0) * length
-                self._ribbon(scriptOp, [at(t0), at(min(length, t0 + PULSE_LEN * length))], width * 1.6, bright)
+                self._strip(scriptOp, at(t0), at(min(length, t0 + min(PULSE_LEN * length, PULSE_MAX * s))), width * 1.6,
+                            bright, 0.25, 0.25)
+
+    @staticmethod
+    def _strip(scriptOp, a, b, width, col, u0, u1):
+        """A straight quad from a to b, facing the camera like the wires,
+        with u running u0..u1 along it."""
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        ln = math.hypot(dx, dy)
+        nx, ny = (-dy / ln * width * 0.5, dx / ln * width * 0.5) if ln > 1e-6 else (width * 0.5, 0.0)
+        pts = []
+        for (x, y, z), sgn in ((a, 1), (a, -1), (b, -1), (b, 1)):
+            pt = scriptOp.appendPoint()
+            pt.P = (x + nx * sgn, y + ny * sgn, z)
+            pts.append(pt)
+        poly = scriptOp.appendPoly(4, closed=True, addPoints=False)
+        for i, (pt, uv) in enumerate(zip(pts, ((u0, 1.0), (u0, 0.0), (u1, 0.0), (u1, 1.0)))):
+            poly[i].point = pt
+            poly[i].uv = (uv[0], uv[1], 0.0)
+        poly.Cd = col
 
     @staticmethod
     def _ribbon(scriptOp, pts, width, col, dashed=False):

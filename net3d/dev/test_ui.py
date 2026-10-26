@@ -2,7 +2,7 @@
 import sys, types, builtins, math
 src = open('export_scene.py').read().split("shots = {")[0]
 src = src.replace("e = M.NetGraphExt(owner)", "e = M.NetGraphExt(owner)\nimport UILayerExt as U")
-for k in ('cropTOP', 'cacheTOP', 'circleTOP', 'constantTOP'):
+for k in ('cropTOP', 'cacheTOP', 'circleTOP', 'constantTOP', 'overTOP'):
     setattr(builtins, k, type(k, (), {}))
 exec(src)
 Pos = lambda x, y: types.SimpleNamespace(x=x, y=y)

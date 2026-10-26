@@ -87,7 +87,7 @@ design and calibration.
 | Reference Pulses | on | Light running along reference wires from the source to the parameter it drives (Live) |
 | Parameter Tags | New References (Fade Out) | A label above the driven operator, e.g. `Rotate ← null_lfo · chan1`, typed on when the reference appears and faded after Tag Hold; or always shown, or off |
 | Tag Hold | 3 | Seconds a new parameter tag stays before fading |
-| Front Opacity | 0.08 | Opacity per level *in front of* Focus Level, i.e. the parents when you are inside a component |
+| Front Opacity | 0.08 | Opacity per level *in front of* Focus Level, i.e. the parents when you are inside a component. They show only while a dive passes through them, then fade out within half a second and leave the render |
 | Focus Level | 0 | Hierarchy level drawn solid. Live mode animates it while diving; you can also animate it yourself |
 
 **Live**
@@ -281,16 +281,19 @@ Record in realtime. Out of realtime the recorded frames came out empty in TD 202
 
 ## Known gaps
 
-- No grid. The operator type is text, not the editor's icon glyph. Flags are drawn only when lit.
+- No grid. Flags are drawn only when lit. A connected input tab stays dark (the tile template shows the
+  unconnected look); resized nodes stretch the template.
 - A live viewer for every operator costs one OP Viewer TOP each. On big networks use TOPs Only, or lower the
   Viewer Resolution.
-- COMPs show their panel through the OP Viewer TOP, which is empty for a Base COMP.
+- COMPs with a panel or 3D content show it through the OP Viewer TOP; other COMPs show their type label, like
+  the editor.
 - Sibling COMPs that sit close together have networks that overlap in X/Y on the same layer. Spread the COMPs
   apart in the editor, or increase Explode.
 - Seen straight on from the front, the deeper layers are hidden behind the top network. Orbit the camera or use
   Explode to see them.
-- Reference wires come from OP-type parameters only. A reference written into an expression (`op('foo')` in a
-  parameter) isn't found. Every operator's parameters are read on every scan, so in Live mode with big networks,
-  turn Reference Wires off or raise Poll Every N Frames.
+- Reading every operator's parameters for references is the expensive part of a scan; in Live mode it runs
+  every 30 frames and when operators come or go, so a new reference can take up to half a second to appear.
+- Measured on TD 2025.33230 with 202 operators (40 references, live viewers on all): Live mode holds 60 fps; an
+  update without changes takes about 5 ms, a full Rebuild about 11 s (it creates every card).
 - Wires that leave the scanned networks (to a COMP outside the target) are not drawn.
 - Each node is a few operators (`cards`), so rebuilding very large networks (hundreds of nodes) is slow.
