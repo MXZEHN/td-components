@@ -37,33 +37,34 @@ script.
 
 import math
 
-# Approximate network editor colours. Edit the 'colors' table to calibrate.
+# Network editor colours measured on TD 2025.33230. build() fills the 'colors'
+# table from the user's ui.colors; edit that table to override.
 DEFAULT_COLORS = {
-    'bg':       (0.20, 0.20, 0.20),
-    'TOP':      (0.45, 0.33, 0.62),
-    'CHOP':     (0.33, 0.55, 0.30),
-    'SOP':      (0.28, 0.42, 0.66),
-    'DAT':      (0.66, 0.32, 0.52),
-    'MAT':      (0.70, 0.60, 0.24),
-    'COMP':     (0.50, 0.50, 0.50),
-    'POP':      (0.76, 0.44, 0.22),
-    'tile':     (0.30, 0.30, 0.30),
-    'text':     (0.90, 0.90, 0.90),
-    'type':     (0.60, 0.60, 0.60),
-    'bypass':   (0.35, 0.35, 0.35),
+    'bg':       (0.098, 0.106, 0.122),
+    'TOP':      (0.349, 0.310, 0.486),
+    'CHOP':     (0.325, 0.459, 0.243),
+    'SOP':      (0.251, 0.420, 0.584),
+    'DAT':      (0.482, 0.310, 0.424),
+    'MAT':      (0.518, 0.486, 0.247),
+    'COMP':     (0.561, 0.565, 0.569),
+    'POP':      (0.271, 0.267, 0.624),
+    'tile':     (0.098, 0.098, 0.102),
+    'text':     (0.75, 0.75, 0.75),
+    'type':     (0.75, 0.75, 0.75),
+    'bypass':   (0.30, 0.30, 0.30),
     'annotate': (0.30, 0.30, 0.30),
     'frame':    (0.25, 0.25, 0.25),
     'hier':     (0.80, 0.80, 0.80),
-    'strip':    (0.16, 0.16, 0.16),
-    'current':  (0.95, 0.80, 0.30),
-    'selected': (0.85, 0.85, 0.85),
+    'strip':    (0.161, 0.161, 0.169),
+    'current':  (0.0, 1.0, 0.0),
+    'selected': (0.85, 0.85, 0.0),
     'flag_bypass':  (0.90, 0.75, 0.20),
     'flag_lock':    (0.85, 0.30, 0.30),
-    'flag_display': (0.30, 0.60, 0.95),
-    'flag_render':  (0.70, 0.40, 0.90),
-    'flag_viewer':  (0.85, 0.85, 0.85),
-    'flag_error':   (0.90, 0.20, 0.20),
-    'flag_warning': (0.95, 0.75, 0.10),
+    'flag_display': (0.195, 0.49, 1.0),
+    'flag_render':  (0.531, 0.402, 1.0),
+    'flag_viewer':  (0.80, 0.80, 0.80),
+    'flag_error':   (1.0, 0.0, 0.0),
+    'flag_warning': (1.0, 1.0, 0.0),
     'hover':        (0.75, 0.75, 0.75),
 }
 
@@ -85,8 +86,13 @@ try:
 except NameError:
     _OPVIEWER = None
 
-# op.color of a node nobody has recoloured
-DEFAULT_NODE_COLOR = (0.55, 0.55, 0.55)
+# op.color of a node nobody has recoloured (0.67 in TD 2025; stored values
+# drift in the third decimal, hence the tolerance)
+DEFAULT_NODE_COLOR = (0.67, 0.67, 0.67)
+
+
+def _isDefaultColor(c):
+    return all(abs(a - b) < 0.01 for a, b in zip(tuple(c)[:3], DEFAULT_NODE_COLOR))
 
 # padding around a nested network's frame, in network units
 FRAME_PAD = 60
@@ -288,7 +294,7 @@ class NetGraphExt:
             color = cols['annotate']
             if all(hasattr(a.par, n) for n in ('Backcolorr', 'Backcolorg', 'Backcolorb')):
                 color = (a.par.Backcolorr.eval(), a.par.Backcolorg.eval(), a.par.Backcolorb.eval())
-            elif tuple(round(c, 3) for c in a.color) != DEFAULT_NODE_COLOR:
+            elif not _isDefaultColor(a.color):
                 color = tuple(a.color)
             self.Panels.append({
                 'key': a.path, 'title': title, 'body': body, 'kind': 'annotate', 'level': level,
@@ -303,7 +309,7 @@ class NetGraphExt:
             wx, wy = world(o.nodeX, o.nodeY)
             fam = o.family
             tint = tuple(o.color)
-            custom = tuple(round(c, 3) for c in tint) != DEFAULT_NODE_COLOR
+            custom = not _isDefaultColor(tint)
             n = {
                 'path': o.path, 'name': o.name, 'type': o.OPType, 'label': _typeLabel(o),
                 'family': fam, 'level': level, 'rank': baseRank,

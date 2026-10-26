@@ -42,9 +42,9 @@ import math
 # Popups TD opens over the editor, and what opens them. Sizes in pixels,
 # anchor = where the popup's top-left corner sits relative to the click.
 DEFAULT_POPUPS = {
-    'context': {'w': 260, 'h': 420, 'dx': 0, 'dy': 0},      # right click
-    'create':  {'w': 680, 'h': 470, 'dx': -340, 'dy': 235},  # Tab: OP Create dialog
-    'info':    {'w': 380, 'h': 280, 'dx': 10, 'dy': 0},     # middle click on a node
+    'context': {'w': 246, 'h': 609, 'dx': 6, 'dy': 202},     # right click
+    'create':  {'w': 784, 'h': 633, 'dx': -392, 'dy': 317},  # Tab: OP Create dialog
+    'info':    {'w': 307, 'h': 233, 'dx': 7, 'dy': 77},      # middle click on a node
 }
 
 MODIFIER_KEYS = {'ctrl', 'lctrl', 'rctrl', 'shift', 'lshift', 'rshift', 'alt', 'lalt', 'ralt',
@@ -367,7 +367,7 @@ class UILayerExt:
         hover = None
         if self._mouseOverEditor():
             nxy = self.WindowToNet(*self._mouseUV)
-            owner = g._ownerPath or getattr(g, '_targetPath', None)
+            owner = g._editorOwner()
             for n in g.Nodes:
                 if n['path'].rsplit('/', 1)[0] != owner:
                     continue

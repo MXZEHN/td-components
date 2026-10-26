@@ -19,7 +19,7 @@ class Op:
         s.name, s.family, s.nodeX, s.nodeY = name, fam, x, y
         s.nodeWidth, s.nodeHeight = 130, 90
         s.path = parent.path + '/' + name if parent else '/' + name
-        s.OPType = typ + fam; s.color = (0.55, 0.55, 0.55); s.expose = True
+        s.OPType = typ + fam; s.color = (0.67, 0.67, 0.67); s.expose = True
         s.isCOMP = fam == 'COMP'; s.children = []; s.par = types.SimpleNamespace()
         for f in ('viewer', 'bypass', 'lock', 'display', 'render', 'current', 'selected'):
             setattr(s, f, flags.get(f, False))

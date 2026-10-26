@@ -28,34 +28,49 @@ SCRIPTS = {
     'par_exec': 'par_exec.py',
 }
 
+# Measured from the network editor of TD 2025.33230 (default UI colours).
+# build() replaces most of them with the user's own ui.colors, see _uiColors.
 COLORS = [
-    ('bg', 0.20, 0.20, 0.20),
-    ('TOP', 0.45, 0.33, 0.62),
-    ('CHOP', 0.33, 0.55, 0.30),
-    ('SOP', 0.28, 0.42, 0.66),
-    ('DAT', 0.66, 0.32, 0.52),
-    ('MAT', 0.70, 0.60, 0.24),
-    ('COMP', 0.50, 0.50, 0.50),
-    ('POP', 0.76, 0.44, 0.22),
-    ('tile', 0.30, 0.30, 0.30),
-    ('text', 0.90, 0.90, 0.90),
-    ('bypass', 0.35, 0.35, 0.35),
+    ('bg', 0.098, 0.106, 0.122),
+    ('TOP', 0.349, 0.310, 0.486),
+    ('CHOP', 0.325, 0.459, 0.243),
+    ('SOP', 0.251, 0.420, 0.584),
+    ('DAT', 0.482, 0.310, 0.424),
+    ('MAT', 0.518, 0.486, 0.247),
+    ('COMP', 0.561, 0.565, 0.569),
+    ('POP', 0.271, 0.267, 0.624),
+    ('tile', 0.098, 0.098, 0.102),
+    ('text', 0.75, 0.75, 0.75),
+    ('bypass', 0.30, 0.30, 0.30),
     ('annotate', 0.30, 0.30, 0.30),
-    ('type', 0.60, 0.60, 0.60),
+    ('type', 0.75, 0.75, 0.75),
     ('frame', 0.25, 0.25, 0.25),
     ('hier', 0.80, 0.80, 0.80),
-    ('strip', 0.16, 0.16, 0.16),
-    ('current', 0.95, 0.80, 0.30),
-    ('selected', 0.85, 0.85, 0.85),
+    ('strip', 0.161, 0.161, 0.169),
+    ('current', 0.0, 1.0, 0.0),
+    ('selected', 0.85, 0.85, 0.0),
     ('flag_bypass', 0.90, 0.75, 0.20),
     ('flag_lock', 0.85, 0.30, 0.30),
-    ('flag_display', 0.30, 0.60, 0.95),
-    ('flag_render', 0.70, 0.40, 0.90),
-    ('flag_viewer', 0.85, 0.85, 0.85),
-    ('flag_error', 0.90, 0.20, 0.20),
-    ('flag_warning', 0.95, 0.75, 0.10),
+    ('flag_display', 0.195, 0.49, 1.0),
+    ('flag_render', 0.531, 0.402, 1.0),
+    ('flag_viewer', 0.80, 0.80, 0.80),
+    ('flag_error', 1.0, 0.0, 0.0),
+    ('flag_warning', 1.0, 1.0, 0.0),
     ('hover', 0.75, 0.75, 0.75),
 ]
+
+# colours key -> ui.colors entry and the factor the editor draws it with
+# (family colours appear at 0.85 of the table value on tiles)
+UI_COLORS = {
+    'bg': ('worksheet.bg', 1.0),
+    'TOP': ('TOP', 0.85), 'CHOP': ('CHOP', 0.85), 'SOP': ('SOP', 0.85), 'DAT': ('DAT', 0.85),
+    'MAT': ('MAT', 0.85), 'POP': ('POP', 0.85),
+    'text': ('tile.name.fg', 1.0), 'type': ('tile.name.fg', 1.0),
+    'current': ('tile.current', 1.0), 'selected': ('tile.picked', 1.0),
+    'flag_display': ('tile.flag.display', 1.0), 'flag_render': ('tile.flag.render', 1.0),
+    'flag_viewer': ('tile.flag.viewer', 1.0), 'flag_error': ('tile.error', 1.0),
+    'flag_warning': ('tile.warning', 1.0),
+}
 
 # Window regions TD does not report as panes, in window UV (origin bottom
 # left). Measured on a maximised 1920x1080 window (Windows 10, TD 2025.33230):
@@ -68,12 +83,17 @@ REGIONS = [
 ]
 
 # Popups opened over the editor: pixels, anchor = top-left corner relative
-# to the click.
+# to the click (dy up). Measured on TD 2025.33230:
+#   context  right-click on empty editor space; TD shifts the menu so the
+#            last used item sits under the cursor, so dy varies
+#   create   OP Create Dialog (Tab), centred on the cursor; its height
+#            follows the longest family list (TOP here)
+#   info     middle-click on a node; height grows with the operator's info
 POPUPS = [
     ('kind', 'w', 'h', 'dx', 'dy'),
-    ('context', 260, 420, 0, 0),
-    ('create', 680, 470, -340, 235),
-    ('info', 380, 280, 10, 0),
+    ('context', 246, 609, 6, 202),
+    ('create', 784, 633, -392, 317),
+    ('info', 307, 233, 7, 77),
 ]
 
 # network-editor units, see DEFAULT_TILE in NetGraphExt
@@ -300,6 +320,22 @@ def _buildUILayer(comp, render):
     out.nodeX, out.nodeY = 1000, 200
 
 
+def _uiColors(rows):
+    """COLORS with the user's own editor colours from ui.colors where TD
+    has them, so the drawn tiles follow a changed colour scheme."""
+    out = []
+    for key, r, g, b in rows:
+        name, k = UI_COLORS.get(key, (None, 1.0))
+        try:
+            c = ui.colors[name] if name else None
+            if c is not None:
+                r, g, b = (round(min(1.0, v * k), 3) for v in tuple(c)[:3])
+        except Exception:
+            pass
+        out.append((key, r, g, b))
+    return out
+
+
 def _windowDisplay():
     """Screen Grab source for the display the TD window sits on: '1', '2', ...
     (window titles change on every save, displays don't). The Screen Grab
@@ -352,7 +388,7 @@ def build(parentComp, scriptsDir, name='net3d'):
     colors = comp.create(tableDAT, 'colors')
     colors.clear()
     colors.appendRow(['key', 'r', 'g', 'b'])
-    for row in COLORS:
+    for row in _uiColors(COLORS):
         colors.appendRow(list(row))
     colors.nodeX, colors.nodeY = -600, 400
     tile = comp.create(tableDAT, 'tile')

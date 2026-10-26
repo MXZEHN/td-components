@@ -35,8 +35,16 @@ typing on, and a UI layer (TD's panes, menus, popups, mouse, clicks, keys) on to
   - `regions` table measured: timeline and menu bar + toolbar.
   - UI cards had no material (`./mat`, the MAT is inside the COMP); chrome now shows TD's pixels.
   - Captured tile faces only record while the editor shows that network (`_editorOwner()`).
-- Still open: the `popups` table (needs the right-click menu, Tab menu and middle-click info opened once),
-  Tile Source = Drawn colours, mouse buttons and hover (needs real clicks), then step 5.
+  - Colours: `build()` fills `colors` from the user's `ui.colors` (family colours at 0.85 of the table value,
+    as the editor draws them); the rest measured from the screen. TD 2025's default `op.color` is 0.67, not 0.55.
+  - Live with the user: hover, left/middle/right buttons, right-click context popup, Tab create popup,
+    middle-click info popup, Keyboard In DAT (Tab, Esc) all work. `popups` measured: context 246 x 609,
+    create 784 x 633 (centred on the cursor), info 307 x 233. When polling from outside, keep the result
+    string short: TDMCP truncates `execute_code` results at about 200 characters.
+- Still open:
+  - Drawn tiles use a simpler model than TD 2025 (family border all round vs. TD's family column with flag
+    icons and a grey frame; live viewers vs. type labels; current operator filled vs. outlined; COMPs flat grey).
+  - Then step 5.
 
 ## Step 1: set up TouchDesigner (the original first task)
 
