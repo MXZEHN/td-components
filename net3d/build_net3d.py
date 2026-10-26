@@ -57,6 +57,8 @@ COLORS = [
     ('flag_error', 1.0, 0.0, 0.0),
     ('flag_warning', 1.0, 1.0, 0.0),
     ('hover', 0.75, 0.75, 0.75),
+    ('refline', 0.30, 0.35, 0.40),
+    ('refarrow', 0.40, 0.467, 0.50),
 ]
 
 # colours key -> ui.colors entry and the factor the editor draws it with
@@ -70,6 +72,8 @@ UI_COLORS = {
     'flag_display': ('tile.flag.display', 1.0), 'flag_render': ('tile.flag.render', 1.0),
     'flag_viewer': ('tile.flag.viewer', 1.0), 'flag_error': ('tile.error', 1.0),
     'flag_warning': ('tile.warning', 1.0),
+    'refline': ('tile.extraconnection.line', 1.0),
+    'refarrow': ('tile.extraconnection.line.hilite', 1.0),
 }
 
 # Window regions TD does not report as panes, in window UV (origin bottom

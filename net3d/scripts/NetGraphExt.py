@@ -67,6 +67,8 @@ DEFAULT_COLORS = {
     'flag_error':   (1.0, 0.0, 0.0),
     'flag_warning': (1.0, 1.0, 0.0),
     'hover':        (0.75, 0.75, 0.75),
+    'refline':      (0.30, 0.35, 0.40),
+    'refarrow':     (0.40, 0.467, 0.50),
 }
 
 # Tile layout in network-editor units. Edit the 'tile' table to calibrate
@@ -148,6 +150,10 @@ REF_FOCUS = 'ref|'
 PULSE_SPEED = 0.6
 PULSE_COUNT = 3
 PULSE_LEN = 0.07
+# references drawn like the editor: dots and gaps of REF_DOT, an arrowhead
+# of REF_ARROW halfway (network units)
+REF_DOT = 2
+REF_ARROW = 12
 # parameter tags: line height and character width in network units, fade time
 TAG_LINE = 22
 TAG_CHAR = 12
@@ -427,7 +433,11 @@ class NetGraphExt:
                     if side in ('cin', 'cout'):
                         dx, dy = (f - 0.5) * n['w'], (0.5 if side == 'cin' else -0.5) * n['h']
                     else:
-                        dx, dy = (-0.5 if side == 'in' else 0.5) * n['w'], (0.5 - f) * n['h']
+                        # like the editor: one equal slot each over the tile body,
+                        # the tile without its name strip
+                        body = n['h'] - (self._tile['namestrip'] + 2) * self._scale
+                        dx = (-0.5 if side == 'in' else 0.5) * n['w']
+                        dy = 0.5 * n['h'] - (i + 0.5) / k * body
                     self.Conns.append({'node': ni, 'side': side, 'dx': dx, 'dy': dy})
                     n['conns'][side].append((dx, dy))
                     if side in ('out', 'cout'):
@@ -525,7 +535,8 @@ class NetGraphExt:
                     w = wired.get((si, di))
                     if w is None:
                         sn, dn = self.Nodes[si], self.Nodes[di]
-                        w = {'a': (si, sn['w'] * 0.5, 0.0), 'b': (di, -dn['w'] * 0.5, 0.0),
+                        # centre to centre, behind the tiles, like the editor
+                        w = {'a': (si, 0.0, 0.0), 'b': (di, 0.0, 0.0),
                              'rs': sn['rank'], 'rd': dn['rank'], 'kind': 'ref',
                              'color': sn['color'], 'src': si, 'dst': di,
                              'key': ('ref', sn['path'], dn['path']), 'pars': []}
@@ -1574,11 +1585,18 @@ class NetGraphExt:
         poses, _ = self.Layout()
         chans = {k: [] for k in ('tx', 'ty', 'tz', 'sx', 'sy', 'sz', 'r', 'g', 'b', 'a')}
         for c in self.Conns:
-            col = self.Nodes[c['node']]['color']
+            nd = self.Nodes[c['node']]
+            col = nd['color']
             x, y, z, s = poses[c['node']]
-            chans['tx'].append(x + c['dx'] * s); chans['ty'].append(y + c['dy'] * s)
+            dx, thick = c['dx'], 1.2
+            if nd['family'] in self._tileLib and c['side'] in ('in', 'out'):
+                # the template draws TD's tab: the cube stays inside the edge,
+                # flush with the slab, and only shows from the side
+                dx -= math.copysign(size * 0.5, dx)
+                thick = 1.0
+            chans['tx'].append(x + dx * s); chans['ty'].append(y + c['dy'] * s)
             chans['tz'].append(z - depth * 0.5)
-            chans['sx'].append(size * s); chans['sy'].append(size * s); chans['sz'].append(depth * 1.2 * max(s, 1e-4))
+            chans['sx'].append(size * s); chans['sy'].append(size * s); chans['sz'].append(depth * thick * max(s, 1e-4))
             chans['r'].append(col[0] * 0.8); chans['g'].append(col[1] * 0.8); chans['b'].append(col[2] * 0.8)
             chans['a'].append(self.LayerAlpha(self.Nodes[c['node']]['level']))
         self._writeChop(scriptOp, chans, len(self.Conns))
@@ -1619,6 +1637,9 @@ class NetGraphExt:
             if g <= 0.0 or not show.get(kind, True):
                 continue
             p0, p3 = end(w['a']), end(w['b'])
+            if kind == 'ref':
+                self._refLine(scriptOp, p0, p3, g, w, pulses)
+                continue
             # handle length grows with the distance, in depth too
             dx = abs(p3[0] - p0[0])
             dz = abs(p3[2] - p0[2])
@@ -1655,17 +1676,52 @@ class NetGraphExt:
             levels = [self.Nodes[e[0]]['level'] if e[0] is not None else e[4] for e in (w['a'], w['b'])]
             alpha = min(self.LayerAlpha(lv) for lv in levels)
             frame = kind == 'frame'
-            # references are dotted, like the editor draws them
-            self._ribbon(scriptOp, pts, width * (0.5 if frame else 1.0), w['color'] + (alpha,),
-                         dashed=frame or kind == 'ref')
-            if kind == 'ref' and g >= 1.0 and pulses:
-                # light running from the source to the parameter it drives
-                bright = tuple(min(1.0, c * 0.35 + 0.65) for c in w['color'])
-                for k in range(PULSE_COUNT):
-                    t0 = (self._now * PULSE_SPEED + k / PULSE_COUNT) % 1.0
-                    t1 = min(1.0, t0 + PULSE_LEN)
-                    seg = [bez(t0 + (t1 - t0) * i / 4.0, CARD_LIFT * 0.5) for i in range(5)]
-                    self._ribbon(scriptOp, seg, width * 1.8, bright + (alpha,))
+            self._ribbon(scriptOp, pts, width * (0.5 if frame else 1.0), w['color'] + (alpha,), dashed=frame)
+
+    def _refLine(self, scriptOp, p0, p3, g, w, pulses):
+        """A reference as the editor draws it: a straight dotted line from
+        the referenced operator's centre to the one using it, behind the
+        tiles, with an arrowhead halfway pointing the way the value goes.
+        It grows from the source (g) and carries pulses once complete."""
+        cols, s = self._cols, self._scale
+        alpha = min(self.LayerAlpha(self.Nodes[e[0]]['level']) for e in (w['a'], w['b']))
+        d = [p3[k] - p0[k] for k in range(3)]
+        length = math.sqrt(sum(v * v for v in d))
+        if length < 1e-6:
+            return
+        u = [v / length for v in d]
+
+        def at(t):
+            return tuple(p0[k] + u[k] * t for k in range(3))
+
+        dot, width = REF_DOT * s, REF_DOT * s
+        line = tuple(cols['refline']) + (alpha,)
+        end, t = g * length, 0.0
+        while t < end:
+            self._ribbon(scriptOp, [at(t), at(min(t + dot, end))], width, line)
+            t += dot * 2
+        if g * length >= length * 0.5 + REF_ARROW * s * 0.5:
+            # arrowhead halfway, across the line in the network plane
+            size = REF_ARROW * s
+            tip, base = at(length * 0.5 + size * 0.5), at(length * 0.5 - size * 0.5)
+            nx, ny = -u[1], u[0]
+            ln = math.hypot(nx, ny) or 1.0
+            nx, ny = nx / ln * size * 0.5, ny / ln * size * 0.5
+            corners = []
+            for pt in (tip, (base[0] + nx, base[1] + ny, base[2]), (base[0] - nx, base[1] - ny, base[2])):
+                c = scriptOp.appendPoint()
+                c.P = pt
+                corners.append(c)
+            poly = scriptOp.appendPoly(3, closed=True, addPoints=False)
+            for i, c in enumerate(corners):
+                poly[i].point = c
+            poly.Cd = tuple(cols['refarrow']) + (alpha,)
+        if pulses and g >= 1.0:
+            # light running from the source to the parameter it drives
+            bright = tuple(min(1.0, c * 1.9) for c in cols['refarrow']) + (alpha,)
+            for k in range(PULSE_COUNT):
+                t0 = ((self._now * PULSE_SPEED + k / PULSE_COUNT) % 1.0) * length
+                self._ribbon(scriptOp, [at(t0), at(min(length, t0 + PULSE_LEN * length))], width * 1.6, bright)
 
     @staticmethod
     def _ribbon(scriptOp, pts, width, col, dashed=False):

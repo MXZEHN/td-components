@@ -70,8 +70,13 @@ typing on, and a UI layer (TD's panes, menus, popups, mouse, clicks, keys) on to
     the familiar proportions. The capture tool needs TD in front; editor zoom animates, so it waits until the
     editor has arrived and checks the tile size.
   - Demo re-rendered: `renders/net3d_demo.mp4`, 15.75 s, 945 frames, H.264 High 4.2.
-  - Known differences: 3D connector cubes stick out where TD has flat tabs; non-default node sizes stretch the
-    template.
+  - References now look like the editor's (user feedback, screenshot): straight, dotted (2 units on, 2 off),
+    centre to centre behind the tiles, arrowhead halfway, colours `tile.extraconnection.line(.hilite)`.
+  - Wires attach where TD's do: connectors spread over the tile body (tile minus the 20-unit name strip), one
+    slot each, so a single connector sits 35 of 90 units from the top; connector cubes stay inside the edge.
+  - The grey full-frame gradient seen in TDMCP grid captures is not in the render (190 frames scanned).
+  - Known differences: a connected input tab stays dark (template shows the unconnected look); non-default
+    node sizes stretch the template.
   - Still to test: dives, UI layer (ripples, keys, UI Rotate), performance.
 - Still open:
   - Drawn tiles use a simpler model than TD 2025 (family border all round vs. TD's family column with flag

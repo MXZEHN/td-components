@@ -64,7 +64,7 @@ design and calibration.
 | Wire Width / Segments | 0.035 / 32 | Wire ribbon width and smoothness |
 | Layer Spacing | 8 | Z distance from a COMP node back to its network. Inside a component the camera stays within this gap, so larger values show more of the network |
 | Hierarchy Wires | on | Wires through the hierarchy: COMP input -> In OP, Out OP -> COMP output |
-| Reference Wires | on | Dotted wires, like the editor's, for references on any level: OP parameters (a Select TOP's TOP, a Geometry COMP's material), expressions and binds naming an operator (`op('null_lfo')['chan1']`) and CHOP exports. Docked helpers (a Ramp's keys table) are left out |
+| Reference Wires | on | References drawn like the editor's: straight dotted lines from tile centre to tile centre, behind the tiles, with an arrowhead halfway pointing to the operator that uses the value (colours from `ui.colors`). On any level: OP parameters (a Select TOP's TOP, a Geometry COMP's material), expressions and binds naming an operator (`op('null_lfo')['chan1']`) and CHOP exports. Docked helpers (a Ramp's keys table) are left out |
 | Frame Guides | off | Thin dashed lines from a COMP tile's corners to its network's frame |
 | Tile Source | Captured Snapshots | Real tiles from snapshots taken with Capture Tile Faces (drawn tile until a node has one), or Drawn: TD's own tile from the tile library (see below) with the live viewer and the name on it |
 | Capture Tile Faces | pulse | Crops every tile fully visible in the network editor from the screen grab once and locks it as a texture, saved with the file. Nothing updates on its own: press again to update them all. Skipped unless TouchDesigner is the foreground window |
