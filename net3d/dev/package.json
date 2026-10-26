@@ -1,0 +1,8 @@
+{
+  "name": "net3d-dev",
+  "private": true,
+  "description": "Offline preview renderer for net3d (three.js + Playwright). Not part of the component.",
+  "dependencies": {
+    "three": "0.160.0"
+  }
+}

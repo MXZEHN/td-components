@@ -222,6 +222,12 @@ image. Frames (0.5) and annotations (0.6) are always see-through, so they never 
 behind them. The top network has no frame. Blending is on for all MATs, and the Render TOP's order-independent
 transparency is switched on when the build exposes it.
 
+## Development
+
+- [HANDOFF.md](HANDOFF.md): next steps in TouchDesigner (build, verify API assumptions, calibrate, export).
+- [dev/](dev/): mock tests and offline preview renders, runnable without TD (`dev/run_all.sh`). The renders are
+  mockups, not TD output.
+
 ## Known gaps
 
 - No grid. The operator type is text, not the editor's icon glyph. Flags are drawn only when lit.
