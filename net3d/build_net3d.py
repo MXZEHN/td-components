@@ -181,6 +181,12 @@ def _customPars(comp):
     p = page.appendFloat('Typespeed', label='Type Speed')[0]; p.default = p.val = 30; p.normMax = 120
     p = page.appendFloat('Approach', label='Approach')[0]; p.default = p.val = 0.2; p.clampMin = p.clampMax = True
     page.appendPulse('Retype', label='Retype Annotations')
+    p = page.appendToggle('Refpulses', label='Reference Pulses')[0]; p.default = p.val = True
+    p = page.appendMenu('Paramtags', label='Parameter Tags')[0]
+    p.menuNames = ['new', 'always', 'off']
+    p.menuLabels = ['New References (Fade Out)', 'Always', 'Off']
+    p.default = p.val = 'new'
+    p = page.appendFloat('Taghold', label='Tag Hold')[0]; p.default = p.val = 3; p.normMax = 10
     p = page.appendFloat('Frontopacity', label='Front Opacity')[0]; p.default = p.val = 0.08; p.clampMin = p.clampMax = True
     p = page.appendFloat('Focuslevel', label='Focus Level')[0]; p.default = p.val = 0; p.normMax = 4
 
@@ -389,6 +395,32 @@ def _uiColors(rows):
     return out
 
 
+def _tileLibrary(comp, folder):
+    """TD's tile per operator family (assets/tiles, made with
+    tools/capture_tile_library.py): one Movie File In TOP each, locked once
+    loaded so the component carries them, and the layout table."""
+    import json
+    lib = comp.create(baseCOMP, 'tilelib')
+    lib.nodeX, lib.nodeY = 200, -350
+    layout = comp.create(tableDAT, 'tilelayout')
+    layout.clear()
+    layout.appendRow(['family', 'w', 'h', 'vx0', 'vy0', 'vx1', 'vy1', 'nx0', 'ny0', 'nx1', 'ny1'])
+    layout.nodeX, layout.nodeY = -600, -500
+    path = os.path.join(folder, 'tiles.json')
+    if not os.path.isfile(path):
+        return
+    with open(path, encoding='utf-8') as f:
+        fams = json.load(f)['families']
+    for i, (fam, d) in enumerate(sorted(fams.items())):
+        t = lib.create(moviefileinTOP, fam)
+        t.par.file = os.path.join(folder, fam + '.png').replace('\\', '/')
+        t.nodeX, t.nodeY = 0, -i * 150
+        layout.appendRow([fam, d['w'], d['h']] + list(d['view']) + list(d['name']))
+    # images load over a few frames; lock them then
+    run("[t.cook(force=True) for t in op({0!r}).children]".format(lib.path), delayFrames=5)
+    run("for t in op({0!r}).children: t.lock = True".format(lib.path), delayFrames=30)
+
+
 def _windowDisplay():
     """Screen Grab source for the display the TD window sits on: '1', '2', ...
     (window titles change on every save, displays don't). The Screen Grab
@@ -486,6 +518,7 @@ def build(parentComp, scriptsDir, name='net3d'):
     cards = comp.create(geometryCOMP, 'cards')
     _clearChildren(cards)
     cards.nodeX, cards.nodeY = 0, -50
+    _tileLibrary(comp, os.path.normpath(os.path.join(scriptsDir, '..', 'assets', 'tiles')))
     # locked tile snapshots (Capture Tile Faces), kept through rebuilds
     if keep is not None:
         snaps = comp.copy(keep, name='snapshots')

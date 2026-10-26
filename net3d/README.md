@@ -64,9 +64,9 @@ design and calibration.
 | Wire Width / Segments | 0.035 / 32 | Wire ribbon width and smoothness |
 | Layer Spacing | 8 | Z distance from a COMP node back to its network. Inside a component the camera stays within this gap, so larger values show more of the network |
 | Hierarchy Wires | on | Wires through the hierarchy: COMP input -> In OP, Out OP -> COMP output |
-| Reference Wires | on | Wires for operator references (a Select TOP's TOP, a Geometry COMP's material, ...), on any level |
+| Reference Wires | on | Dotted wires, like the editor's, for references on any level: OP parameters (a Select TOP's TOP, a Geometry COMP's material), expressions and binds naming an operator (`op('null_lfo')['chan1']`) and CHOP exports. Docked helpers (a Ramp's keys table) are left out |
 | Frame Guides | off | Thin dashed lines from a COMP tile's corners to its network's frame |
-| Tile Source | Captured Snapshots | Real tiles from snapshots taken with Capture Tile Faces (drawn tile until a node has one), or Drawn |
+| Tile Source | Captured Snapshots | Real tiles from snapshots taken with Capture Tile Faces (drawn tile until a node has one), or Drawn: TD's own tile from the tile library (see below) with the live viewer and the name on it |
 | Capture Tile Faces | pulse | Crops every tile fully visible in the network editor from the screen grab once and locks it as a texture, saved with the file. Nothing updates on its own: press again to update them all. Skipped unless TouchDesigner is the foreground window |
 | TOP Previews | All Operators | What fills each tile's viewer area: live viewers for all operators, TOPs only, only operators with Viewer Active on, or none (operator type labels) |
 | Viewer Resolution | 2 | Pixels per network unit for the live viewers |
@@ -84,6 +84,9 @@ design and calibration.
 | Type Speed | 30 | Characters per second; punctuation and line breaks pause a little longer |
 | Approach | 0.2 | How close counts as an approach: the annotation's centre is in view and it is at least this fraction of the frame high |
 | Retype Annotations | pulse | Forget which annotations have been typed |
+| Reference Pulses | on | Light running along reference wires from the source to the parameter it drives (Live) |
+| Parameter Tags | New References (Fade Out) | A label above the driven operator, e.g. `Rotate ← null_lfo · chan1`, typed on when the reference appears and faded after Tag Hold; or always shown, or off |
+| Tag Hold | 3 | Seconds a new parameter tag stays before fading |
 | Front Opacity | 0.08 | Opacity per level *in front of* Focus Level, i.e. the parents when you are inside a component |
 | Focus Level | 0 | Hierarchy level drawn solid. Live mode animates it while diving; you can also animate it yourself |
 
@@ -171,6 +174,31 @@ The defaults are from memory of the editor, not measured. To calibrate:
 
 Operators that get a custom colour in the editor use it for their name strip.
 
+## Tile library
+
+TouchDesigner draws every operator of a family with the same tile; only the viewer and the name change. net3d
+uses one template per family (TOP, CHOP, SOP, DAT, MAT, POP, COMP) from [`assets/tiles`](assets/tiles) and puts the
+live viewer and the name (Consolas, like the editor) into the template's rectangles. A highlighted operator
+(current, selected, hover) gets a coloured rim around the tile, like the editor's outline. Families without a
+template fall back to a simpler drawn tile.
+
+The templates are photographs of the editor at **100% zoom**: TouchDesigner keeps the tile chrome (family column,
+icons, borders, name strip) at a fixed screen size, so a tile at another zoom has other proportions. They are
+upscaled 4x for close-ups; the 100% originals are in `assets/tiles/source_1x`. `tiles.json` holds each
+family's template size and its viewer and name rectangles.
+
+To make the library again (another TouchDesigner build, another UI theme), with net3d built in `/project1`:
+
+```python
+d = op('/project1').create(textDAT, 'tile_capture')
+d.text = open('C:/path/to/td-components/net3d/tools/capture_tile_library.py').read()
+d.module.ZOOM = 1.0
+d.module.Start('C:/path/to/new_tiles')
+```
+
+It waits until TouchDesigner is the foreground window, photographs one operator per family and writes the PNGs
+and `tiles.json`. Then upscale the PNGs 4x and scale the rectangles in `tiles.json` by 4, as in `assets/tiles`.
+
 ## How it works
 
 | Operator | Role |
@@ -225,6 +253,25 @@ Opacity**. A tile's slab fades faster than its viewer (opacity squared), so a fa
 image. Frames (0.5) and annotations (0.6) are always see-through, so they never hide nodes that Explode pushes
 behind them. The top network has no frame. Blending is on for all MATs, and the Render TOP's order-independent
 transparency is switched on when the build exposes it.
+
+## Demo animation
+
+[`demo/build_demo.py`](demo/build_demo.py) builds a small network one operator at a time (noise, level,
+transform, then an LFO driving the transform's Rotate, a ramp composited in, a null, an annotation) and records net3d's 3D render with a
+Movie File Out TOP (H.264, MP4): Live on, camera in Follow mode, drawn tiles from the tile library. The camera
+visits each new operator; when the LFO starts driving the transform's Rotate, it frames both ends while the
+dotted reference wire grows in and its parameter tag types on; it visits the annotation while it types on, then
+eases out to the whole network. About 16 seconds at 60 fps.
+
+```python
+d = op('/project1').create(textDAT, 'demo_build')
+d.text = open('C:/path/to/td-components/net3d/demo/build_demo.py').read()
+d.module.Start(record=True, file='C:/path/to/net3d_demo.mp4')
+# when it has finished:
+d.module.Restore()
+```
+
+Record in realtime. Out of realtime the recorded frames came out empty in TD 2025.33230.
 
 ## Development
 

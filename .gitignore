@@ -5,3 +5,6 @@ CrashAutoSave*
 .claude/
 __pycache__/
 *.pyc
+
+# rendered videos (net3d demo)
+renders/

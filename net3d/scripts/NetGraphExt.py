@@ -36,6 +36,7 @@ script.
 """
 
 import math
+import re
 
 # Network editor colours measured on TD 2025.33230. build() fills the 'colors'
 # table from the user's ui.colors; edit that table to override.
@@ -113,17 +114,44 @@ def _tdInFront():
 def _isDefaultColor(c):
     return all(abs(a - b) < 0.01 for a, b in zip(tuple(c)[:3], DEFAULT_NODE_COLOR))
 
+# _focus value while Frame(smooth=True) eases to the overview
+FRAME_FOCUS = '<frame>'
+
 # gaps in front of a node's slab, in world units: the card over the slab,
 # the snapshot over the drawn card. Large enough for a 24-bit depth buffer
 # seen from an angle (the examine camera), far below what reads as depth.
 CARD_LIFT = 0.006
 FACE_LIFT = 0.004
+# font of operator names, like the editor's name strip
+NAME_FONT = 'Consolas'
+# viewer and name above the tile template on a card
+DRAWN_LIFT = 0.002
+# coloured rim around a highlighted tile (current, selected, hover), network units
+HILITE_RIM = 4
 
 # padding around a nested network's frame, in network units
 FRAME_PAD = 60
 
 # opacity of frames and annotations, before the layer fade
-PANEL_ALPHA = {'frame': 0.5, 'annotate': 0.6}
+PANEL_ALPHA = {'frame': 0.5, 'annotate': 0.6, 'tag': 0.95}
+
+# parameter references (an expression reading another operator):
+# op('null_lfo') with an optional ['chan1'] after it
+_OP_REF = re.compile(r"op\(\s*['\"]([^'\"]+)['\"]\s*\)(?:\[\s*['\"]([^'\"]+)['\"]\s*\])?")
+# a new reference: the camera frames both ends this long, then settles on
+# the operator it drives; its wire grows this many Birth Times
+REF_FRAME_TIME = 2.0
+REF_GROW = 1.4
+REF_FOCUS = 'ref|'
+# light pulses running along reference wires: passes per second, how many,
+# length as a fraction of the wire
+PULSE_SPEED = 0.6
+PULSE_COUNT = 3
+PULSE_LEN = 0.07
+# parameter tags: line height and character width in network units, fade time
+TAG_LINE = 22
+TAG_CHAR = 12
+TAG_FADE = 1.0
 
 
 def _clamp(v, lo=0.0, hi=1.0):
@@ -168,6 +196,8 @@ class NetGraphExt:
         self.MaxRank = 0
         self._born = {}      # path -> absTime.seconds the node first appeared
         self._raw = {}       # path -> (nodeX, nodeY) at the last scan
+        self._scanned = False    # a scan has run since the last rebuild
+        self._panelKeys = set()  # frames and annotations seen so far
         self._cards = {}     # key -> (card id, content signature)
         self._nextCard = 0
         self._structure = None
@@ -181,9 +211,12 @@ class NetGraphExt:
         self._chain = set()      # that network and its ancestors: always scanned
         self._trans = None       # running dive / surface transition
         self._typed = {}         # annotation path -> typewriter state
+        self._wireBorn = {}      # reference wire key -> time it appeared
+        self._refT0 = 0.0        # when the camera started framing a new reference
         # filled by _scan; defaults for the Script OPs that cook before it
         self._index, self._ops = {}, []
         self._cols, self._tile = dict(DEFAULT_COLORS), dict(DEFAULT_TILE)
+        self._tileLib = {}
         self._scale, self._layer, self._maxLevel = 0.01, 8.0, 0
         self._previews = 'all'
         self._targetPath = None
@@ -209,6 +242,22 @@ class NetGraphExt:
                 except (ValueError, TypeError):
                     pass
         return cols
+
+    def TileLibrary(self):
+        """Template per operator family (see tools/capture_tile_library.py):
+        template size and the viewer and name rectangles in template pixels,
+        from the 'tilelayout' table. Empty when there is no library."""
+        lib = {}
+        t = self.ownerComp.op('tilelayout')
+        if t is None:
+            return lib
+        for r in range(1, t.numRows):
+            try:
+                v = [float(t[r, c]) for c in range(1, t.numCols)]
+            except (ValueError, TypeError):
+                continue
+            lib[t[r, 0].val] = {'w': v[0], 'h': v[1], 'view': v[2:6], 'name': v[6:10]}
+        return lib
 
     def Tile(self):
         tile = dict(DEFAULT_TILE)
@@ -244,6 +293,7 @@ class NetGraphExt:
         self.Networks = {}
         self._cols = self.Colors()
         self._tile = self.Tile()
+        self._tileLib = self.TileLibrary()
         self._scale = p.Scale.eval()
         self._layer = p.Layerspacing.eval()
         self._maxLevel = int(p.Recurse.eval())
@@ -256,6 +306,8 @@ class NetGraphExt:
         self._targetPath = target.path
         if p.References.eval():
             self._linkReferences()
+            if p.Paramtags.eval() != 'off':
+                self._addTags()
 
     def _scanNetwork(self, comp, level, parentNode, baseRank):
         ops, notes = self._visibleChildren(comp)
@@ -451,30 +503,91 @@ class NetGraphExt:
                                'src': si, 'dst': ni})
 
     def _linkReferences(self):
-        """Operator references (a Select TOP's TOP, a Geometry COMP's
-        material, ...) between scanned operators, on any level, drawn as
-        wires from the referenced operator to the one referencing it."""
-        wired = {(w['src'], w['dst']) for w in self.Wires if 'src' in w}
+        """References between scanned operators, on any level, drawn as
+        dotted wires from the referenced operator to the one referencing
+        it: OP parameters (a Select TOP's TOP, a Geometry COMP's material),
+        expressions and binds naming an operator (op('null_lfo')['chan1'])
+        and CHOP exports. Each wire lists the parameters it drives."""
+        wired = {(w['src'], w['dst']): w for w in self.Wires if 'src' in w}
         for di, o in enumerate(self._ops):
             pars = getattr(o, 'pars', None)
             if pars is None:
                 continue
             for par in pars():
-                if not getattr(par, 'isOP', False):
-                    continue
-                try:
-                    v = par.eval()
-                except Exception:
-                    continue
-                for t in (v if isinstance(v, (list, tuple)) else [v]):
+                for t, chan in self._parSources(o, par):
                     si = self._index.get(getattr(t, 'path', None))
-                    if si is None or si == di or (si, di) in wired:
+                    if si is None or si == di:
                         continue
-                    wired.add((si, di))
-                    sn, dn = self.Nodes[si], self.Nodes[di]
-                    self.Wires.append({'a': (si, sn['w'] * 0.5, 0.0), 'b': (di, -dn['w'] * 0.5, 0.0),
-                                       'rs': sn['rank'], 'rd': dn['rank'], 'kind': 'ref',
-                                       'color': sn['color'], 'src': si, 'dst': di})
+                    # a docked helper (a Ramp's keys table) belongs to its
+                    # host: no reference worth a wire or a tag
+                    if getattr(t, 'dock', None) == o or getattr(o, 'dock', None) == t:
+                        continue
+                    w = wired.get((si, di))
+                    if w is None:
+                        sn, dn = self.Nodes[si], self.Nodes[di]
+                        w = {'a': (si, sn['w'] * 0.5, 0.0), 'b': (di, -dn['w'] * 0.5, 0.0),
+                             'rs': sn['rank'], 'rd': dn['rank'], 'kind': 'ref',
+                             'color': sn['color'], 'src': si, 'dst': di,
+                             'key': ('ref', sn['path'], dn['path']), 'pars': []}
+                        self.Wires.append(w)
+                        wired[(si, di)] = w
+                    if w['kind'] != 'ref':
+                        continue
+                    entry = (getattr(par, 'label', None) or getattr(par, 'name', ''), chan)
+                    if entry not in w['pars']:
+                        w['pars'].append(entry)
+
+    @staticmethod
+    def _parSources(o, par):
+        """Operators a parameter takes its value from, each with the channel
+        the expression names ('' if none): [(OP, chan)]."""
+        if getattr(par, 'isOP', False):
+            try:
+                v = par.eval()
+            except Exception:
+                return []
+            return [(t, '') for t in (v if isinstance(v, (list, tuple)) else [v]) if t is not None]
+        out = []
+        src = getattr(par, 'exportOP', None)
+        if src is not None:
+            out.append((src, getattr(getattr(par, 'exportSource', None), 'name', '') or ''))
+        try:
+            mode = par.mode
+            text = par.expr if mode == ParMode.EXPRESSION else par.bindExpr if mode == ParMode.BIND else ''
+        except Exception:
+            return out
+        for m in _OP_REF.finditer(text or ''):
+            t = None
+            for base in (o, o.parent()):
+                try:
+                    t = base.op(m.group(1))
+                except Exception:
+                    t = None
+                if t is not None:
+                    break
+            if t is not None:
+                out.append((t, m.group(2) or ''))
+        return out
+
+    def _addTags(self):
+        """A small label above the operator a reference drives, naming each
+        parameter and where it comes from: 'Rotate <- null_lfo . chan1'."""
+        s = self._scale
+        for w in self.Wires:
+            if w['kind'] != 'ref' or not w.get('pars'):
+                continue
+            sn, dn = self.Nodes[w['src']], self.Nodes[w['dst']]
+            lines = ['{} ← {}{}'.format(label, sn['name'], ' · ' + chan if chan else '')
+                     for label, chan in w['pars']]
+            netw = max(dn['netw'] * 1.2, TAG_CHAR * max(len(t) for t in lines) + 16)
+            neth = TAG_LINE * len(lines) + 10
+            tw, th = netw * s, neth * s
+            self.Panels.append({
+                'key': 'tag:{}>{}'.format(sn['path'], dn['path']), 'title': '\n'.join(lines), 'kind': 'tag',
+                'level': dn['level'], 'x': dn['x'] - dn['w'] * 0.5 + tw * 0.5,
+                'y': dn['y'] + dn['h'] * 0.5 + th * 0.5 + 6 * s,
+                'w': tw, 'h': th, 'netw': netw, 'z': dn['z'], 'color': self._cols['strip'], 'wire': w['key'],
+            })
 
     def _rank(self, first, last):
         """Longest-path rank from sources, for the nodes [first, last)."""
@@ -505,6 +618,9 @@ class NetGraphExt:
         self._cards = {}
         self._born = {}
         self._raw = {}
+        self._wireBorn = {}
+        self._scanned = False
+        self._panelKeys = set()
         self._focus = None
         self._typed = {}
         self.Update(force=True)
@@ -524,9 +640,17 @@ class NetGraphExt:
             seen.add(path)
             if path not in self._born:
                 # on a full rebuild everything is simply there
-                self._born[path] = -1e9 if (force or not self._raw) else self._now
-                if not force and self._raw:
-                    added = path
+                fresh = not force and self._scanned
+                self._born[path] = self._now if fresh else -1e9
+                if fresh:
+                    # a docked helper (a Ramp's keys table) arrives with its
+                    # host: follow the host
+                    try:
+                        o = op(path)
+                    except NameError:   # outside TouchDesigner
+                        o = None
+                    dock = getattr(o, 'dock', None) if o is not None else None
+                    added = dock.path if dock is not None else path
             raw = (n['nx'], n['ny'])
             if path in self._raw and self._raw[path] != raw:
                 moved = path
@@ -535,6 +659,26 @@ class NetGraphExt:
             if path not in seen:
                 del self._born[path]
                 self._raw.pop(path, None)
+        refs = {w['key'] for w in self.Wires if w.get('key')}
+        for key in refs:
+            if key not in self._wireBorn:
+                fresh = not force and self._scanned
+                self._wireBorn[key] = self._now if fresh else -1e9
+                if fresh:
+                    # a new reference: show both ends, then the operator it drives
+                    added = REF_FOCUS + key[1] + '|' + key[2]
+                    self._refT0 = self._now
+        for key in list(self._wireBorn):
+            if key not in refs:
+                del self._wireBorn[key]
+        keys = {pl['key'] for pl in self.Panels}
+        if not force and self._scanned:
+            # a new annotation is worth a visit too (it types on when approached)
+            new = [pl['key'] for pl in self.Panels if pl['key'] not in self._panelKeys and pl['kind'] == 'annotate']
+            if new:
+                added = new[-1]
+        self._panelKeys = keys
+        self._scanned = True
         if added or moved:
             self._focus = added or moved
 
@@ -578,12 +722,30 @@ class NetGraphExt:
             birth = p.Birthtime.eval()
             if any(now - b < birth for b in self._born.values()):
                 self._cook()
+            elif self._refsMoving(now):
+                for name in ('wires', 'notes'):
+                    o = self.ownerComp.op(name)
+                    if o is not None:
+                        o.cook(force=True)
             if p.Follow.eval() and self._trans is None and p.Cameramode.eval() != 'mirror':
                 self._follow(dt)
 
-    def Frame(self):
+    def _refsMoving(self, now):
+        """Reference wires growing or pulsing, or a tag typing or fading:
+        the wires and notes CHOPs need a cook every frame."""
+        p = self.ownerComp.par
+        if p.Refpulses.eval() and self._wireBorn:
+            return True
+        busy = p.Birthtime.eval() * REF_GROW + p.Taghold.eval() + TAG_FADE
+        return any(now - b < busy for b in self._wireBorn.values())
+
+    def Frame(self, smooth=False):
         """Point the internal camera at the network being edited, or at
-        everything when no component has been entered."""
+        everything when no component has been entered. smooth=True moves
+        there with the follow camera's easing (Live, Follow on) instead of
+        cutting."""
+        # the overview holds until the next new operator
+        self._focus = None
         if self._ownerPath in self.Networks and self._ownerPath != getattr(self, '_targetPath', None):
             self._setCam(*self._framePose(self._ownerPath))
             self._camPos = None
@@ -599,9 +761,12 @@ class NetGraphExt:
         res = self.ownerComp.op('render')
         aspect = res.width / max(1, res.height)
         half = max((y1 - y0) * 0.5, (x1 - x0) * 0.5 / aspect) * 1.1
-        cam.par.tx = (x0 + x1) * 0.5
-        cam.par.ty = (y0 + y1) * 0.5
-        cam.par.tz = half / self.TanHalfV(aspect)
+        cx, cy, dist = (x0 + x1) * 0.5, (y0 + y1) * 0.5, half / self.TanHalfV(aspect)
+        if smooth:
+            self._focus = FRAME_FOCUS
+            self._frameWant = ((cx, cy, dist), (cx, cy, 0.0))
+            return
+        cam.par.tx, cam.par.ty, cam.par.tz = cx, cy, dist
         cam.par.rx = cam.par.ry = cam.par.rz = 0
         self._camPos = None
 
@@ -617,7 +782,10 @@ class NetGraphExt:
 
     def _panelText(self, pl):
         """What a panel shows right now: frames their title, annotations
-        their text as far as it has been typed."""
+        and parameter tags their text as far as it has been typed."""
+        if pl['kind'] == 'tag':
+            st = self._typed.get(pl['key'])
+            return st['shown'] if st and st['shown'] is not None else pl['title']
         if pl['kind'] != 'annotate' or self.ownerComp.par.Annotations.eval() != 'typewriter':
             return self._fullText(pl) if pl['kind'] == 'annotate' else pl['title']
         st = self._typed.get(pl['key'])
@@ -640,9 +808,9 @@ class NetGraphExt:
         now = absTime.seconds
         explode = p.Explode.eval()
         for i, pl in enumerate(self.Panels):
-            if pl['kind'] != 'annotate':
+            if pl['kind'] not in ('annotate', 'tag'):
                 continue
-            full = self._fullText(pl)
+            full = self._fullText(pl) if pl['kind'] == 'annotate' else pl['title']
             st = self._typed.get(pl['key'])
             if st is None:
                 st = self._typed[pl['key']] = {'t0': None, 'text': full, 'shown': None, 'from': 0}
@@ -650,6 +818,9 @@ class NetGraphExt:
                 # edited while on screen: keep typing appended text, show the rest
                 st['from'] = len(st['text']) if full.startswith(st['text']) else len(full)
                 st['text'], st['t0'] = full, (now if st['t0'] is not None else None)
+            if st['t0'] is None and pl['kind'] == 'tag':
+                # types on as its wire appears; references there from the start show whole
+                st['t0'] = self._wireBorn.get(pl['wire'], -1e9)
             if st['t0'] is None:
                 z = pl['z'] - explode * pl['level']
                 if ui_ is None or self._approached(ui_, pl, z, p.Approach.eval()):
@@ -869,15 +1040,49 @@ class NetGraphExt:
 
     def _follow(self, dt):
         cam = self.ownerComp.op('cam')
-        i = self._index.get(self._focus) if self._focus else None
-        if cam is None or i is None:
+        if cam is None or not self._focus:
             return
         p = self.ownerComp.par
-        poses, _ = self.Layout()
-        x, y, z, _s = poses[i]
-        look = (x, y, z)
         off = (p.Followoffsetx.eval(), p.Followoffsety.eval(), p.Followoffsetz.eval())
-        want = (x + off[0], y + off[1], z + off[2])
+        res = self.ownerComp.op('render')
+        aspect = res.width / max(1, res.height)
+        if self._focus == FRAME_FOCUS:
+            # Frame(smooth=True): ease to the overview
+            want, look = self._frameWant
+        elif self._focus.startswith(REF_FOCUS):
+            # a new reference: both operators and the wire between them
+            src, dst = self._focus[len(REF_FOCUS):].split('|', 1)
+            ends = [self._index.get(src), self._index.get(dst)]
+            if None in ends:
+                return
+            if self._now - self._refT0 > REF_FRAME_TIME:
+                self._focus = dst
+                return
+            poses, _ = self.Layout()
+            items = [(poses[k], self.Nodes[k]) for k in ends]
+            x0 = min(q[0] - n['w'] * 0.5 for q, n in items)
+            x1 = max(q[0] + n['w'] * 0.5 for q, n in items)
+            y0 = min(q[1] - n['h'] * 0.5 for q, n in items)
+            y1 = max(q[1] + n['h'] * 0.5 for q, n in items)
+            # room above for the parameter tag
+            half = max((y1 - y0) * 0.5 + 0.3, (x1 - x0) * 0.5 / aspect) * 1.25
+            cx, cy, z = (x0 + x1) * 0.5, (y0 + y1) * 0.5 + 0.15, max(q[2] for q, _n in items)
+            look = (cx, cy, z)
+            want = (cx, cy, z + max(off[2], half / self.TanHalfV(aspect)))
+        elif self._index.get(self._focus) is not None:
+            poses, _ = self.Layout()
+            x, y, z, _s = poses[self._index[self._focus]]
+            look = (x, y, z)
+            want = (x + off[0], y + off[1], z + off[2])
+        else:
+            # an annotation: keep the whole panel in view
+            pl = next((q for q in self.Panels if q['key'] == self._focus), None)
+            if pl is None:
+                return
+            x, y, z = pl['x'], pl['y'], pl['z']
+            half = max(pl['h'] * 0.5, pl['w'] * 0.5 / aspect) * 1.2
+            look = (x, y, z)
+            want = (x, y, z + max(off[2], half / self.TanHalfV(aspect)))
         if self._camPos is None:
             self._camPos = (cam.par.tx.eval(), cam.par.ty.eval(), cam.par.tz.eval())
             self._camLook = look
@@ -921,6 +1126,9 @@ class NetGraphExt:
             ends = [poses[e[0]][3] for e in (w['a'], w['b']) if e[0] is not None]
             if ends:
                 g = min(g, *ends)
+            if birth is not None and w.get('key') in self._wireBorn:
+                # a reference added between operators that were already there
+                g = min(g, _smooth((self._now - self._wireBorn[w['key']]) / (birth * REF_GROW)))
             grow.append(g)
         return poses, grow
 
@@ -982,6 +1190,21 @@ class NetGraphExt:
             b, ns = tile['border'], tile['namestrip']
             vw, vh = n['netw'] - 2 * b, n['neth'] - 2 * b - ns
             src = self._viewSource(n)
+            tpl = self._tileLib.get(n['family'])
+            if tpl is not None:
+                # TD's own tile: the family's template, viewer and name in its rectangles
+                view, vwh = self._tplRect(n, tpl, 'view')
+                name, nwh = self._tplRect(n, tpl, 'name')
+                wanted[n['path']] = ('inst', i, dict(
+                    panel=False, path=n['path'], src=src, text=n['name'], label=n['label'],
+                    strip=n['tint'] if n['custom'] else cols['strip'],
+                    iconbg=cols['tile'], bypass=n['bypass'],
+                    view=view if vwh[1] > 4 else None, name=name,
+                    viewpx=(max(8, int(vwh[0] * vres)), max(8, int(vwh[1] * vres))),
+                    namepx=(max(8, int(nwh[0] * lres)), max(8, int(nwh[1] * lres))),
+                    bg=n['family'], bgrect=(0.0, 0.0, n['w'], n['h']),
+                    face=(0.0, 0.0, n['w'], n['h']) if captured else None))
+                continue
             wanted[n['path']] = ('inst', i, dict(
                 panel=False, path=n['path'], src=src, text=n['name'], label=n['label'],
                 strip=n['tint'] if n['custom'] else cols['strip'],
@@ -1011,7 +1234,7 @@ class NetGraphExt:
 
         for key, (src, idx, spec) in wanted.items():
             content = (spec['src'], spec['path'], spec['view'] is not None, spec['viewpx'], spec['namepx'],
-                       spec.get('face') is not None)
+                       spec.get('face') is not None, spec.get('bg'))
             have = self._cards.get(key)
             if have is not None and have[1] != content:
                 old = cards.op('c{}'.format(have[0]))
@@ -1035,7 +1258,7 @@ class NetGraphExt:
                 for sp in ('sx', 'sy', 'sz'):
                     getattr(geo.par, sp).expr = "{0}['sc'][{1}]".format(ref, idx)
                 # deeper layers fade; the MATs sit one network further down
-                for part in ('view', 'name'):
+                for part in ('view', 'name', 'bg'):
                     mat = geo.op(part + '_mat')
                     if mat is not None:
                         mat.par.alpha.expr = "op('../../{0}')['ca'][{1}]".format(src, idx)
@@ -1056,7 +1279,8 @@ class NetGraphExt:
         # the snapshot covers the whole tile: the drawn parts under it would
         # only fight it for depth. Without one, the empty face stays out of
         # the render (transparent, it would still hide what's behind it)
-        for part, on in (('gview', snap is None), ('gname', snap is None), ('gface', snap is not None)):
+        for part, on in (('gview', snap is None), ('gname', snap is None), ('gbg', snap is None),
+                         ('gface', snap is not None)):
             g = geo.op(part)
             if g is not None:
                 g.render = on
@@ -1107,6 +1331,19 @@ class NetGraphExt:
             count += 1
         return count
 
+    def _tplRect(self, n, tpl, part):
+        """A template rectangle (template pixels, top left origin) as a card
+        rectangle (centre x, centre y, w, h in world units, relative to
+        the node centre) and its size in network units, stretched to the
+        node's size."""
+        x0, y0, x1, y1 = tpl[part]
+        fw, fh = n['netw'] / tpl['w'], n['neth'] / tpl['h']
+        w, h = (x1 - x0) * fw, (y1 - y0) * fh
+        cx = ((x0 + x1) * 0.5 - tpl['w'] * 0.5) * fw
+        cy = (tpl['h'] * 0.5 - (y0 + y1) * 0.5) * fh
+        s = self._scale
+        return (cx * s, cy * s, w * s, h * s), (w, h)
+
     def _makeCard(self, cards, cid, spec):
         geo = cards.create(geometryCOMP, 'c{}'.format(cid))
         for c in list(geo.children):
@@ -1142,8 +1379,26 @@ class NetGraphExt:
             q.par.sop = '../../../quad'
             q.render = q.display = True
             g.par.material = mat.name
+            if spec.get('bg'):
+                g.par.tz = DRAWN_LIFT
             for j, o_ in enumerate((tex, mat, g)):
                 o_.nodeX, o_.nodeY = j * 200, y
+        if spec.get('bg'):
+            # the family's tile template; wires can't cross COMPs, so select it in
+            src = geo.create(selectTOP, 'bg_src')
+            src.par.top = '../../tilelib/' + spec['bg']
+            mat = geo.create(constantMAT, 'bg_mat')
+            mat.par.colormap = 'bg_src'
+            _setpar(mat, 'blending', True)
+            g = geo.create(geometryCOMP, 'gbg')
+            for c in list(g.children):
+                c.destroy()
+            q = g.create(selectSOP, 'quad')
+            q.par.sop = '../../../quad'
+            q.render = q.display = True
+            g.par.material = 'bg_mat'
+            for j, o_ in enumerate((src, mat, g)):
+                o_.nodeX, o_.nodeY = j * 200 - 200, 600
         if spec.get('face') is not None:
             # the snapshot itself lives in 'snapshots', outside the cards, so
             # it survives card rebuilds and reloads; see CaptureTiles
@@ -1164,8 +1419,8 @@ class NetGraphExt:
             self._linkSnapshot(geo, spec['path'])
 
     def _styleCard(self, geo, spec, cols, tile):
-        for part in ('view', 'name', 'face'):
-            rect = spec.get(part)
+        for part in ('view', 'name', 'face', 'bg'):
+            rect = spec.get('bgrect' if part == 'bg' else part)
             g = geo.op('g' + part)
             if rect is None or g is None:
                 continue
@@ -1187,6 +1442,8 @@ class NetGraphExt:
             _setpar(name, 'positionx', 8 * res * 0.5)
             _setpar(name, 'positiony', -6 * res * 0.5)
         else:
+            # the editor writes operator names in a monospaced font
+            _setpar(name, 'font', NAME_FONT)
             _setpar(name, 'fontsizex', tile['namesize'] * res)
             _setpar(name, 'alignx', 'left')
             _setpar(name, 'aligny', 'center')
@@ -1223,16 +1480,26 @@ class NetGraphExt:
         hl = p.Highlight.eval()
         poses, _ = self.Layout()
         chans = {k: [] for k in ('tx', 'ty', 'tz', 'sx', 'sy', 'sz', 'r', 'g', 'b', 'a', 'fz', 'sc', 'ca')}
+        rim = HILITE_RIM * self._scale
         for n, (x, y, z, s) in zip(self.Nodes, poses):
             col = n['color']
+            lit = False
             if hl and n['path'] == getattr(self, '_hover', None):
-                col = cols['hover']
+                col, lit = cols['hover'], True
             elif hl and n['current']:
-                col = cols['current']
+                col, lit = cols['current'], True
             elif hl and n['selected']:
-                col = cols['selected']
+                col, lit = cols['selected'], True
+            pad = 0.0
+            if n['family'] in self._tileLib:
+                # under TD's own tile the slab is just its edge: grey, or the
+                # highlight as a rim around the tile like the editor's outline
+                pad = rim if lit else 0.0
+                if not lit:
+                    col = tuple(c * 0.55 for c in cols['COMP'])
             chans['tx'].append(x); chans['ty'].append(y); chans['tz'].append(z - depth * 0.5)
-            chans['sx'].append(n['w'] * s); chans['sy'].append(n['h'] * s); chans['sz'].append(depth * max(s, 1e-4))
+            chans['sx'].append((n['w'] + 2 * pad) * s); chans['sy'].append((n['h'] + 2 * pad) * s)
+            chans['sz'].append(depth * max(s, 1e-4))
             chans['r'].append(col[0]); chans['g'].append(col[1]); chans['b'].append(col[2])
             # the slab fades faster than the card on it, so a faded tile
             # reads as its viewer rather than a block of family colour
@@ -1281,11 +1548,23 @@ class NetGraphExt:
         for pl in self.Panels:
             chans['sc'].append(1.0)
             # panels are see-through so they never hide nodes pushed behind them
-            chans['ca'].append(self.LayerAlpha(pl['level']) * PANEL_ALPHA[pl['kind']])
+            chans['ca'].append(self.LayerAlpha(pl['level']) * PANEL_ALPHA[pl['kind']] * self._tagAlpha(pl))
             chans['tx'].append(pl['x']); chans['ty'].append(pl['y'])
-            chans['fz'].append(pl['z'] - explode * pl['level'] - depth * (2.5 if pl['kind'] == 'frame' else 1.5))
+            if pl['kind'] == 'tag':
+                # in front of the tiles, like a label stuck on
+                chans['fz'].append(pl['z'] - explode * pl['level'] + CARD_LIFT * 2)
+            else:
+                chans['fz'].append(pl['z'] - explode * pl['level'] - depth * (2.5 if pl['kind'] == 'frame' else 1.5))
             chans['fx'].append(pl['w']); chans['fy'].append(pl['h'])
         self._writeChop(scriptOp, chans, len(self.Panels))
+
+    def _tagAlpha(self, pl):
+        """Parameter tags stay for Tag Hold after their reference appears,
+        then fade (Parameter Tags 'new'), or always show."""
+        if pl['kind'] != 'tag' or self.ownerComp.par.Paramtags.eval() == 'always':
+            return 1.0
+        age = self._now - self._wireBorn.get(pl['wire'], -1e9)
+        return _clamp(1.0 - (age - self.ownerComp.par.Taghold.eval()) / TAG_FADE)
 
     def CookConn(self, scriptOp):
         """Connector tabs on the node edges."""
@@ -1324,6 +1603,7 @@ class NetGraphExt:
         explode = p.Explode.eval()
         show = {'in': p.Hierlinks.eval(), 'out': p.Hierlinks.eval(), 'frame': p.Framelinks.eval()}
         poses, grow = self.Layout()
+        pulses = p.Refpulses.eval() and p.Live.eval()
         scriptOp.clear()
         scriptOp.primAttribs.create('Cd')
 
@@ -1363,17 +1643,29 @@ class NetGraphExt:
                 d = max(dx * 0.5, dz * 0.25, 0.3)
                 p1 = (p0[0] + d, p0[1], p0[2])
                 p2 = (p3[0] - d, p3[1], p3[2])
-            n = max(2, int(segs * g))
-            pts = []
-            for i in range(n + 1):
-                t = g * i / n
+            def bez(t, lift=0.0):
                 u = 1.0 - t
                 k0, k1, k2, k3 = u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t
-                pts.append(tuple(k0 * p0[j] + k1 * p1[j] + k2 * p2[j] + k3 * p3[j] for j in range(3)))
+                pt = [k0 * p0[j] + k1 * p1[j] + k2 * p2[j] + k3 * p3[j] for j in range(3)]
+                pt[2] += lift
+                return tuple(pt)
+
+            n = max(2, int(segs * g))
+            pts = [bez(g * i / n) for i in range(n + 1)]
             levels = [self.Nodes[e[0]]['level'] if e[0] is not None else e[4] for e in (w['a'], w['b'])]
             alpha = min(self.LayerAlpha(lv) for lv in levels)
             frame = kind == 'frame'
-            self._ribbon(scriptOp, pts, width * (0.5 if frame else 1.0), w['color'] + (alpha,), dashed=frame)
+            # references are dotted, like the editor draws them
+            self._ribbon(scriptOp, pts, width * (0.5 if frame else 1.0), w['color'] + (alpha,),
+                         dashed=frame or kind == 'ref')
+            if kind == 'ref' and g >= 1.0 and pulses:
+                # light running from the source to the parameter it drives
+                bright = tuple(min(1.0, c * 0.35 + 0.65) for c in w['color'])
+                for k in range(PULSE_COUNT):
+                    t0 = (self._now * PULSE_SPEED + k / PULSE_COUNT) % 1.0
+                    t1 = min(1.0, t0 + PULSE_LEN)
+                    seg = [bez(t0 + (t1 - t0) * i / 4.0, CARD_LIFT * 0.5) for i in range(5)]
+                    self._ribbon(scriptOp, seg, width * 1.8, bright + (alpha,))
 
     @staticmethod
     def _ribbon(scriptOp, pts, width, col, dashed=False):

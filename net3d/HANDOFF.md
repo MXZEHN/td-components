@@ -57,8 +57,22 @@ typing on, and a UI layer (TD's panes, menus, popups, mouse, clicks, keys) on to
     cameraViewport panel). Examine camera near plane 0.5.
   - Z-fighting in the examiner fixed: card 6 mm over the slab, snapshot 4 mm over the drawn parts
     (`CARD_LIFT`, `FACE_LIFT`); drawn parts hidden under a snapshot, empty faces not rendered.
-  - Still to test: dives, annotations, UI layer (ripples, keys, UI Rotate), performance, and a real Capture Tile
-    Faces run with TD in front.
+  - Demo animation (`demo/build_demo.py`, user request): rendered `renders/net3d_demo.mp4` (git-ignored), 13.25 s,
+    795 frames. Fixes it needed in the follow camera: the first operator after an empty scan is followed; a
+    docked helper (a Ramp's keys DAT) sends the camera to its host; new annotations are visited; Frame() clears
+    the follow target, and Frame(smooth=True) eases there. Recording out of realtime gave empty frames.
+  - Parameter references (user request): expressions, binds and exports are detected (`dependenciesTo` plus the
+    expression text give source, parameter, channel); dotted wires grow in with pulses, the follow camera frames
+    both ends for 2 s, a tag (`Rotate ← null_lfo · chan1`) types on and fades. Demo has its own beat for it.
+  - Tile library (user's idea, replaces the simplified drawn tile): one template per family photographed at
+    100% zoom with `tools/capture_tile_library.py`, upscaled 4x into `assets/tiles`; cards put the live viewer and
+    the name into the template's rectangles. TD keeps tile chrome at a fixed screen size, so only 100% zoom gives
+    the familiar proportions. The capture tool needs TD in front; editor zoom animates, so it waits until the
+    editor has arrived and checks the tile size.
+  - Demo re-rendered: `renders/net3d_demo.mp4`, 15.75 s, 945 frames, H.264 High 4.2.
+  - Known differences: 3D connector cubes stick out where TD has flat tabs; non-default node sizes stretch the
+    template.
+  - Still to test: dives, UI layer (ripples, keys, UI Rotate), performance.
 - Still open:
   - Drawn tiles use a simpler model than TD 2025 (family border all round vs. TD's family column with flag
     icons and a grey frame; live viewers vs. type labels; current operator filled vs. outlined; COMPs flat grey).
