@@ -91,8 +91,33 @@ except NameError:
 DEFAULT_NODE_COLOR = (0.67, 0.67, 0.67)
 
 
+def _snapName(path):
+    """Name of an operator's snapshot in the 'snapshots' COMP."""
+    return 's_' + ''.join(ch if ch.isalnum() else '_' for ch in path.strip('/'))
+
+
+def _tdInFront():
+    """True when TouchDesigner's window is the foreground window (Windows);
+    True elsewhere, where it can't be checked."""
+    try:
+        import ctypes
+        import os
+        user32 = ctypes.windll.user32
+        pid = ctypes.c_ulong()
+        user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), ctypes.byref(pid))
+        return pid.value == os.getpid()
+    except Exception:
+        return True
+
+
 def _isDefaultColor(c):
     return all(abs(a - b) < 0.01 for a, b in zip(tuple(c)[:3], DEFAULT_NODE_COLOR))
+
+# gaps in front of a node's slab, in world units: the card over the slab,
+# the snapshot over the drawn card. Large enough for a 24-bit depth buffer
+# seen from an angle (the examine camera), far below what reads as depth.
+CARD_LIFT = 0.006
+FACE_LIFT = 0.004
 
 # padding around a nested network's frame, in network units
 FRAME_PAD = 60
@@ -1014,16 +1039,73 @@ class NetGraphExt:
                     mat = geo.op(part + '_mat')
                     if mat is not None:
                         mat.par.alpha.expr = "op('../../{0}')['ca'][{1}]".format(src, idx)
-                if geo.op('face') is not None:
-                    # crop follows the tile on screen; the cache holds the last
-                    # frame it was fully visible; shown once it has been seen
-                    crop = geo.op('face_src')
-                    for par_, ch in (('cropleft', 'l'), ('cropright', 'r'), ('cropbottom', 'b'), ('croptop', 't')):
-                        getattr(crop.par, par_).expr = "op('../../tiles')['{0}'][{1}]".format(ch, idx)
-                    geo.op('face').par.active.expr = "op('../../tiles')['vis'][{0}] > 0.5".format(idx)
+                if geo.op('face_mat') is not None:
+                    # the face is a snapshot (CaptureTiles); shown once taken
                     geo.op('face_mat').par.alpha.expr = (
-                        "op('../../inst')['ca'][{0}] * op('../../tiles')['got'][{0}]".format(idx))
+                        "op('../../inst')['ca'][{0}] * parent().fetch('captured', 0)".format(idx))
             self._cards[key] = (cid, content, (src, idx))
+
+    def _linkSnapshot(self, geo, path):
+        """Point a card's face at the operator's snapshot, if there is one."""
+        face = geo.op('face')
+        snaps = self.ownerComp.op('snapshots')
+        snap = snaps.op(_snapName(path)) if snaps is not None else None
+        if face is not None:
+            face.par.top = snap.path if snap is not None else ''
+        geo.store('captured', 1 if snap is not None else 0)
+        # the snapshot covers the whole tile: the drawn parts under it would
+        # only fight it for depth. Without one, the empty face stays out of
+        # the render (transparent, it would still hide what's behind it)
+        for part, on in (('gview', snap is None), ('gname', snap is None), ('gface', snap is not None)):
+            g = geo.op(part)
+            if g is not None:
+                g.render = on
+
+    def CaptureTiles(self):
+        """Batch update of the captured tile faces: every node whose tile is
+        fully visible in the network editor right now is cropped from the
+        screen grab once and locked as a texture in 'snapshots' (saved with
+        the file, kept through rebuilds). Nothing updates them on its own;
+        call again after changes. TD has to be in front and uncovered while
+        this runs. Returns how many were captured."""
+        oc = self.ownerComp
+        grab, tiles, cards = oc.op('grab'), oc.op('tiles'), oc.op('cards')
+        if grab is None or tiles is None or cards is None:
+            return 0
+        if not _tdInFront():
+            # the grab would record whatever window covers TD
+            debug('net3d: CaptureTiles skipped, TouchDesigner is not the foreground window')
+            return 0
+        snaps = oc.op('snapshots') or oc.create(baseCOMP, 'snapshots')
+        src = snaps.op('grab')
+        if src is None:
+            # wires can't cross COMPs: select the grab in first
+            src = snaps.create(selectTOP, 'grab')
+            src.par.top = '../grab'
+        grab.cook(force=True)
+        tiles.cook(force=True)
+        count = 0
+        for i, n in enumerate(self.Nodes):
+            if i >= tiles.numSamples or tiles['vis'][i] < 0.5:
+                continue
+            name = _snapName(n['path'])
+            crop = snaps.op(name)
+            if crop is None:
+                crop = snaps.create(cropTOP, name)
+                crop.inputConnectors[0].connect(src)
+                crop.nodeX, crop.nodeY = 200, -len(snaps.children) * 120
+            crop.store('path', n['path'])
+            crop.lock = False
+            for par_, ch in (('cropleft', 'l'), ('cropright', 'r'), ('cropbottom', 'b'), ('croptop', 't')):
+                getattr(crop.par, par_).val = tiles[ch][i]
+            crop.cook(force=True)
+            crop.lock = True
+            have = self._cards.get(n['path'])
+            geo = cards.op('c{}'.format(have[0])) if have else None
+            if geo is not None:
+                self._linkSnapshot(geo, n['path'])
+            count += 1
+        return count
 
     def _makeCard(self, cards, cid, spec):
         geo = cards.create(geometryCOMP, 'c{}'.format(cid))
@@ -1063,14 +1145,9 @@ class NetGraphExt:
             for j, o_ in enumerate((tex, mat, g)):
                 o_.nodeX, o_.nodeY = j * 200, y
         if spec.get('face') is not None:
-            # wires can't cross COMPs: select the grab into this card first
-            grab = geo.create(selectTOP, 'grab')
-            grab.par.top = '../../grab'
-            crop = geo.create(cropTOP, 'face_src')
-            crop.inputConnectors[0].connect(grab)
-            cache = geo.create(cacheTOP, 'face')
-            cache.inputConnectors[0].connect(crop)
-            _setpar(cache, 'cachesize', 1)
+            # the snapshot itself lives in 'snapshots', outside the cards, so
+            # it survives card rebuilds and reloads; see CaptureTiles
+            face = geo.create(selectTOP, 'face')
             mat = geo.create(constantMAT, 'face_mat')
             mat.par.colormap = 'face'
             _setpar(mat, 'blending', True)
@@ -1081,9 +1158,10 @@ class NetGraphExt:
             q.par.sop = '../../../quad'
             q.render = q.display = True
             g.par.material = 'face_mat'
-            g.par.tz = 0.0008
-            for j, o_ in enumerate((grab, crop, cache, mat, g)):
-                o_.nodeX, o_.nodeY = j * 200 - 400, 300
+            g.par.tz = FACE_LIFT
+            for j, o_ in enumerate((face, mat, g)):
+                o_.nodeX, o_.nodeY = j * 200 - 200, 300
+            self._linkSnapshot(geo, spec['path'])
 
     def _styleCard(self, geo, spec, cols, tile):
         for part in ('view', 'name', 'face'):
@@ -1161,7 +1239,7 @@ class NetGraphExt:
             alpha = self.LayerAlpha(n['level'])
             chans['a'].append(alpha ** 2)
             chans['ca'].append(alpha)
-            chans['fz'].append(z + 0.001)
+            chans['fz'].append(z + CARD_LIFT)
             chans['sc'].append(max(s, 1e-4))
         self._writeChop(scriptOp, chans, len(self.Nodes))
 

@@ -358,9 +358,6 @@ class UILayerExt:
         o = self.ownerComp.op('ui')
         if o is not None:
             o.cook(force=True)
-        t = self.ownerComp.op('tiles')
-        if t is not None and p.Tilesource.eval() == 'captured':
-            t.cook(force=True)
 
     def _updateHover(self):
         g = self.ownerComp.ext.NetGraphExt
@@ -685,16 +682,14 @@ class UILayerExt:
 
     def CookTiles(self, scriptOp):
         """Per node of NetGraphExt: its tile's rectangle in the grab (crop
-        l r b t), whether it is fully on screen in the editor right now
-        (vis: the card's Cache TOP records it) and whether it has ever been
-        (got: the captured face is shown instead of the drawn one)."""
+        l r b t) and whether it is fully on screen in the editor right now
+        (vis). Cooked by NetGraphExt.CaptureTiles, not every frame."""
         g = self.ownerComp.ext.NetGraphExt
         rect = self.EditorRect()
         # only the network the editor really shows is on screen; net3d's own
         # owner path stays put while the editor is somewhere net3d ignores
         owner = g._editorOwner()
-        got = getattr(self, '_got', set())
-        chans = {k: [] for k in ('l', 'r', 'b', 't', 'vis', 'got')}
+        chans = {k: [] for k in ('l', 'r', 'b', 't', 'vis')}
         for n in g.Nodes:
             a = b = None
             if rect is not None and n['path'].rsplit('/', 1)[0] == owner:
@@ -702,12 +697,9 @@ class UILayerExt:
                 b = self.NetToWindow(n['nx'] + n['netw'], n['ny'] + n['neth'])
             vis = bool(a and b and self._inRect(a, rect) and self._inRect(b, rect)
                        and not (self._popup and self._popup['kind'] != 'info'))
-            if vis:
-                got.add(n['path'])
             a, b = a or (0, 0), b or (1, 1)
             chans['l'].append(a[0]); chans['r'].append(b[0]); chans['b'].append(a[1]); chans['t'].append(b[1])
-            chans['vis'].append(float(vis)); chans['got'].append(float(n['path'] in got))
-        self._got = got
+            chans['vis'].append(float(vis))
         scriptOp.clear()
         n = len(g.Nodes)
         scriptOp.numSamples = max(1, n)

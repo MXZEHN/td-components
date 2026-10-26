@@ -41,6 +41,24 @@ typing on, and a UI layer (TD's panes, menus, popups, mouse, clicks, keys) on to
     middle-click info popup, Keyboard In DAT (Tab, Esc) all work. `popups` measured: context 246 x 609,
     create 784 x 633 (centred on the cursor), info 307 x 233. When polling from outside, keep the result
     string short: TDMCP truncates `execute_code` results at about 200 characters.
+- Step 5 (in progress):
+  - Mirror camera: the 3D tiles sit within 2.5 px of the editor's tiles. Live add, move, rewire, delete: all
+    picked up within a second, new nodes grow in, no errors.
+  - Examine viewport built in: `examine_cam` (TD's palette `cameraViewport`, loaded from `app.samplesFolder`),
+    `render_examine`, `examine` panel; pulses Open Examine Viewer and Home Examine Camera. The main camera stays
+    untouched. cameraViewport homes on the constant value of the Render TOP's geometry parameter, so that is a
+    string, not an expression.
+  - Tile faces are snapshots now (user's decision): live capture recorded other windows covering TD. Capture
+    Tile Faces locks each visible tile's crop as a texture and only runs while TD is the foreground window.
+    Snapshots live in `net3d/snapshots` (one locked Crop TOP per operator path), not in the cards, so they
+    survive card rebuilds, extension restarts (file open) and `build()`. Verified with a real capture: 12 clean
+    tiles.
+  - Examine panel: all three mouse buttons and the wheel on (cameraViewport needs them; rule for every
+    cameraViewport panel). Examine camera near plane 0.5.
+  - Z-fighting in the examiner fixed: card 6 mm over the slab, snapshot 4 mm over the drawn parts
+    (`CARD_LIFT`, `FACE_LIFT`); drawn parts hidden under a snapshot, empty faces not rendered.
+  - Still to test: dives, annotations, UI layer (ripples, keys, UI Rotate), performance, and a real Capture Tile
+    Faces run with TD in front.
 - Still open:
   - Drawn tiles use a simpler model than TD 2025 (family border all round vs. TD's family column with flag
     icons and a grey frame; live viewers vs. type labels; current operator filled vs. outlined; COMPs flat grey).

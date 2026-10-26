@@ -164,8 +164,9 @@ def _customPars(comp):
     p = page.appendFloat('Viewerres', label='Viewer Resolution')[0]; p.default = p.val = 2; p.normMin = 0.5; p.normMax = 4
     p = page.appendMenu('Tilesource', label='Tile Source')[0]
     p.menuNames = ['drawn', 'captured']
-    p.menuLabels = ['Drawn', 'Captured from Editor']
+    p.menuLabels = ['Drawn', 'Captured Snapshots']
     p.default = p.val = 'captured'
+    page.appendPulse('Capturetiles', label='Capture Tile Faces')
     p = page.appendFloat('Labelres', label='Label Resolution')[0]; p.default = p.val = 3; p.normMin = 0.5; p.normMax = 6
     p = page.appendToggle('Highlight', label='Highlight Current')[0]; p.default = p.val = True
 
@@ -231,6 +232,8 @@ def _customPars(comp):
     p.default = p.val = 'mirror'
     page.appendCOMP('Camera', label='Camera')
     page.appendPulse('Frameall', label='Frame All')
+    page.appendPulse('Examine', label='Open Examine Viewer')
+    page.appendPulse('Examinehome', label='Home Examine Camera')
     p = page.appendInt('Res', label='Resolution', size=2)
     p[0].default = p[0].val = 1920
     p[1].default = p[1].val = 1080
@@ -320,6 +323,56 @@ def _buildUILayer(comp, render):
     out.nodeX, out.nodeY = 1000, 200
 
 
+# TD's palette camera with tumble, pan and zoom like the built-in 3D viewers
+EXAMINE_TOX = 'Palette/Tools/cameraViewport.tox'
+
+
+def _buildExamine(comp):
+    """A second render of the same geometry through TD's palette
+    cameraViewport, shown in the 'examine' panel, for looking around the 3D
+    network with the mouse. It never touches the main render or its camera,
+    so mirror and animation cameras stay as they are. It only cooks while
+    the panel is viewed."""
+    src = comp.op('render')
+    try:
+        holder = comp.loadTox(app.samplesFolder + '/' + EXAMINE_TOX)
+        holder.name = 'examine_cam'
+        cam = holder.op('cameraViewport')
+    except Exception:
+        # no palette in this install: a plain camera, no mouse control
+        holder = cam = comp.create(cameraCOMP, 'examine_cam')
+        cam.par.tz = 30
+    holder.nodeX, holder.nodeY = 200, -500
+    # 5x the default depth precision; the scene is tens of units away
+    _setparSafe(cam, 'near', 0.5)
+    r = comp.create(renderTOP, 'render_examine')
+    r.par.camera = cam
+    # constant, not an expression: cameraViewport homes on the bounds of
+    # the geometry parameter's constant value
+    r.par.geometry = src.par.geometry.val
+    r.par.lights = ''
+    r.par.outputresolution = 'custom'
+    r.par.resolutionw.expr = 'parent().par.Res1'
+    r.par.resolutionh.expr = 'parent().par.Res2'
+    for pn in ('antialias', 'transparency', 'bgcolorr', 'bgcolorg', 'bgcolorb', 'bgcolora'):
+        if hasattr(r.par, pn):
+            getattr(r.par, pn).expr = "op('render').par.{0}.eval()".format(pn)
+    r.nodeX, r.nodeY = 400, -500
+    v = comp.create(containerCOMP, 'examine')
+    v.par.w.expr = 'parent().par.Res1'
+    v.par.h.expr = 'parent().par.Res2'
+    v.par.top = r.name
+    # cameraViewport navigates with all three buttons and the wheel; panels
+    # pass only the left button unless told otherwise
+    for pn in ('uvbuttonsleft', 'uvbuttonsmiddle', 'uvbuttonsright', 'mousewheel'):
+        _setparSafe(v, pn, True)
+    v.nodeX, v.nodeY = 600, -500
+    if hasattr(cam.par, 'Refpanel'):
+        cam.par.Refpanel = v
+        cam.par.Refrender = r
+    return cam
+
+
 def _uiColors(rows):
     """COLORS with the user's own editor colours from ui.colors where TD
     has them, so the drawn tiles follow a changed colour scheme."""
@@ -362,7 +415,11 @@ def _setparSafe(o, name, value):
 
 def build(parentComp, scriptsDir, name='net3d'):
     old = parentComp.op(name)
+    keep = None
     if old is not None:
+        # tile snapshots outlive a rebuild of the component
+        if old.op('snapshots') is not None:
+            keep = parentComp.copy(old.op('snapshots'), name='net3d_snapshots_keep')
         old.destroy()
     comp = parentComp.create(baseCOMP, name)
     comp.color = (0.25, 0.35, 0.5)
@@ -429,6 +486,13 @@ def build(parentComp, scriptsDir, name='net3d'):
     cards = comp.create(geometryCOMP, 'cards')
     _clearChildren(cards)
     cards.nodeX, cards.nodeY = 0, -50
+    # locked tile snapshots (Capture Tile Faces), kept through rebuilds
+    if keep is not None:
+        snaps = comp.copy(keep, name='snapshots')
+        keep.destroy()
+    else:
+        snaps = comp.create(baseCOMP, 'snapshots')
+    snaps.nodeX, snaps.nodeY = 0, -350
 
     cam = comp.create(cameraCOMP, 'cam')
     cam.nodeX, cam.nodeY = 0, -200
@@ -468,5 +532,8 @@ def build(parentComp, scriptsDir, name='net3d'):
     # Target left empty = the network net3d sits in
     comp.ext.NetGraphExt.Rebuild()
     comp.ext.NetGraphExt.Frame()
+    cam = _buildExamine(comp)
+    if hasattr(cam, 'ext') and getattr(cam.ext, 'CameraExt', None) is not None:
+        cam.ext.CameraExt.Home()
     comp.viewer = True
     return comp

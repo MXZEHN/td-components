@@ -79,7 +79,7 @@ new network.
 
 | Element | Source of truth | Layer | Representation | When shown |
 | --- | --- | --- | --- | --- |
-| Node tiles (viewer, name, flags, colour, error/warning badge) | grab, cropped at the tile's editor rect | World | Real pixels on the 3D slab; a Cache TOP keeps the last frame it was fully on screen | Always; drawn tile until first seen |
+| Node tiles (viewer, name, flags, colour, error/warning badge) | grab, cropped at the tile's editor rect | World | Snapshot: Capture Tile Faces crops every visible tile once and locks it as a texture (no live capture) | Always; drawn tile until captured |
 | Live viewers in tiles | grab (inside tile) | World | Live while visible, last frame when not | Always |
 | Wires | API (connectors) | World | 3D bezier ribbons, family colour | Always |
 | Wires to In/Out OPs across levels, references (Select OPs, ...) | API | World | Same bezier ribbons, easing between depths | Toggle |

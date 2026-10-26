@@ -66,7 +66,8 @@ design and calibration.
 | Hierarchy Wires | on | Wires through the hierarchy: COMP input -> In OP, Out OP -> COMP output |
 | Reference Wires | on | Wires for operator references (a Select TOP's TOP, a Geometry COMP's material, ...), on any level |
 | Frame Guides | off | Thin dashed lines from a COMP tile's corners to its network's frame |
-| Tile Source | Captured from Editor | Real tiles cropped from the screen grab (drawn tile until a node has been on screen once), or Drawn |
+| Tile Source | Captured Snapshots | Real tiles from snapshots taken with Capture Tile Faces (drawn tile until a node has one), or Drawn |
+| Capture Tile Faces | pulse | Crops every tile fully visible in the network editor from the screen grab once and locks it as a texture, saved with the file. Nothing updates on its own: press again to update them all. Skipped unless TouchDesigner is the foreground window |
 | TOP Previews | All Operators | What fills each tile's viewer area: live viewers for all operators, TOPs only, only operators with Viewer Active on, or none (operator type labels) |
 | Viewer Resolution | 2 | Pixels per network unit for the live viewers |
 | Label Resolution | 3 | Pixels per network unit for the name strips |
@@ -133,7 +134,8 @@ Call `op('net3d').Dive('/project1/fx')` to run the same move from a script, for 
 | Hold / Fade Time | 2.5 / 0.25 | Seconds an element stays after its last signal / fade duration |
 | Cursor, Click Ripples, Keys, Mouse Buttons | on | Overlays |
 | Calibration Overlay | off | Predicted tile rectangles over the grab, for calibrating |
-| Cursor Size, Path Bar Height | 7, 28 | Pixels |
+| Cursor Size, Path Bar Height | 7, 23 | Pixels |
+| Window Inset | 8, 8 | Pixels between the window's edge and its client area (the OS frame); pane coordinates start there |
 | UI Translate / Rotate / Scale | 0 / 0 / 1 | Moves the UI layer's plane in 3D; at the defaults it fills the frame exactly |
 | UI Depth | 0.03 | Z gap between the UI's sublayers (chrome, popups, overlays, calibration); they separate with parallax when the plane turns |
 | Mouse Offset / Scale, Network Offset / Zoom Scale | 0 / 1 | Calibration of the screen <-> network mapping |
@@ -147,6 +149,8 @@ Tables: `regions` (timeline, menu bar, ... in window UV) and `popups` (menu size
 | Camera Mode | Mirror Editor View | Line the edited network up with the editor pixel for pixel, or follow new operators |
 | Camera | empty | Your own camera instead of the internal `cam` |
 | Frame All | pulse | Frame the current component |
+| Open Examine Viewer | pulse | Opens the `examine` panel in a floating window: a second render of the same scene through TD's palette `cameraViewport`, to tumble (left drag), pan (right drag) and zoom (middle drag, wheel). It never moves the main camera or your own cameras |
+| Home Examine Camera | pulse | Frames the whole scene in the examine viewer |
 | Resolution | 1920 x 1080 | Output size when the UI layer is off (with it on, the output is the TD window's size) |
 
 ### Matching the editor

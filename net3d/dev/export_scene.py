@@ -95,6 +95,8 @@ class TOp:
     def create(s, kind, name): o = TOp(kind.__name__, name, s); s.kids[name] = o; return o
     def op(s, name): return s.kids.get(name)
     def destroy(s): del s.parentop.kids[s.name]
+    def store(s, k, v): s.__dict__.setdefault('_store', {})[k] = v
+    def fetch(s, k, d=None): return s.__dict__.get('_store', {}).get(k, d)
 for k in ('geometryCOMP', 'selectTOP', 'fitTOP', 'textTOP', 'constantMAT', 'selectSOP', 'opviewerTOP',
           'cropTOP', 'cacheTOP', 'circleTOP', 'constantTOP'):
     setattr(builtins, k, type(k, (), {}))
