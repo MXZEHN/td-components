@@ -1,12 +1,12 @@
 # td-components
 
 Reusable [TouchDesigner](https://derivative.ca) components, each documented and ready to drop into a project.
-Built and tested on TouchDesigner 2025.32820.
+Built and tested on TouchDesigner 2025 (cam_nav on 2025.32820, net3d on 2025.33230).
 
 | Component | What it does |
 | --- | --- |
 | [`cam_nav`](cam_nav/) | Fly or walk a camera through a 3D scene with an Xbox controller. |
-| [`net3d`](net3d/) | Rebuild any network in 3D from TD's own pixels, with live mode, component dives and a UI layer, for recording tutorials. Untested; build script only. |
+| [`net3d`](net3d/) | Rebuild any network in 3D with TD's own tile look, with live mode, component dives, parameter references and a UI layer, for recording tutorials. Tested on 2025.33230. |
 
 Each component lives in its own folder with a `README.md`, the exported `.tox`, and any scripts it needs.
 

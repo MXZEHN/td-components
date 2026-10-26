@@ -31,13 +31,39 @@ So straight on, the output looks like TD, and it turns 3D when you dive into com
 or move the camera. Mouse, clicks and keys are shown on the UI layer. See [UI_LAYER.md](UI_LAYER.md) for the
 design and calibration.
 
-> **Status: untested in TouchDesigner.** This was written without a TouchDesigner session, so there is no `.tox`
-> yet. The scan, layout, reveal and wire geometry were exercised against a mocked network in plain Python. The
-> operator wiring and parameter names in `build_net3d.py` still need a first run in TD. The scan, hierarchy
-> layout, live updates, camera follow and tile building were also exercised against that mocked network. The OP
-> Viewer TOP parameter (`opviewer`) and the Fit TOP mode (`best`) are from memory, not checked against TD.
+Tested in TouchDesigner 2025.33230 on Windows 10 (1920 x 1080, three monitors).
 
-## Build
+## Install
+
+Two exports of the same component are provided:
+
+| File | Scripts | Use it when |
+| --- | --- | --- |
+| [`net3d_standalone.tox`](net3d_standalone.tox) | Embedded in the tox, no other files needed | You just want to drop it in and go |
+| [`net3d.tox`](net3d.tox) | Synced to `scripts/net3d/` next to your project | You want to edit the scripts in an external editor with live reload |
+
+Both carry the tile library (locked templates) and TD's palette `cameraViewport` for the examine viewer.
+
+**Standalone (simplest)**
+
+1. Drag [`net3d_standalone.tox`](net3d_standalone.tox) into the network you want to see in 3D. Target left empty
+   means that network; set **Target** to show another COMP.
+2. View `net3d/out1` (or `net3d/render` without the UI layer). Turn on **Live** to follow edits as they happen.
+3. For the UI layer, the editor mapping is calibrated for a maximised window on Windows (see
+   [UI_LAYER.md](UI_LAYER.md) for other layouts).
+
+**With external scripts**
+
+1. Copy the files in [`scripts/`](scripts/) to `<your project folder>/scripts/net3d/`. The 14 script DATs inside
+   `net3d.tox` sync to those relative paths.
+2. Drag [`net3d.tox`](net3d.tox) into your network, then follow steps 2 and 3 above.
+
+Both tox files were checked by loading them into a fresh COMP with a small network: 55 operators, 75 parameters
+at their defaults, the 7 templates locked with no file path, no cards or snapshots carried over; the
+standalone has no file links, `net3d.tox` has all 14 script DATs synced to `scripts/net3d/`. In both, a
+Rebuild found the network and its expression reference without errors.
+
+## Build from the scripts
 
 1. In TouchDesigner, open the Textport (Alt+T) and run:
 
@@ -46,8 +72,24 @@ design and calibration.
    build(op('/project1'), 'C:/path/to/td-components/net3d/scripts')
    ```
 
-   This creates `/project1/net3d` with the scripts copied into its DATs.
-2. Check `net3d/render`, then save it: `op('/project1/net3d').save('net3d.tox')`.
+   This creates `/project1/net3d` with the scripts copied into its DATs and the tile library from
+   `assets/tiles`, locked after loading (the timeline has to be playing for that).
+2. To export: remove the cards and snapshots, clear the template file paths, and save, as described in
+   [HANDOFF.md](HANDOFF.md) step 6.
+
+## What turned out different in TouchDesigner
+
+Written without TouchDesigner first, net3d needed these changes on its first run (details in
+[HANDOFF.md](HANDOFF.md)):
+
+- Parameter names: Render TOP `bgcolora`, `transparency` = `orderind`, `antialias` = `aa16`; Fit TOP
+  `fitbest`; Mouse In CHOP buttons must be named and `output` = `normal`; Keyboard In DAT calls
+  `onKey(dat, keyInfo)`.
+- Pane coordinates start inside the OS window frame (Window Inset) and the editor's view centre excludes the path
+  bar. Screen Grab numbers displays in `monitors` order.
+- TD keeps tile chrome at a fixed screen size, so tiles come from a library photographed at 100% zoom.
+- Live screen capture of tiles was replaced by snapshots (Capture Tile Faces); references are drawn like the
+  editor's (straight, dotted, arrowhead); parent levels leave the render after a dive.
 
 ## Parameters
 

@@ -423,7 +423,7 @@ def _tileLibrary(comp, folder):
         layout.appendRow([fam, d['w'], d['h']] + list(d['view']) + list(d['name']))
     # images load over a few frames; lock them then
     run("[t.cook(force=True) for t in op({0!r}).children]".format(lib.path), delayFrames=5)
-    run("for t in op({0!r}).children: t.lock = True".format(lib.path), delayFrames=30)
+    run("[setattr(t, 'lock', True) for t in op({0!r}).children]".format(lib.path), delayFrames=30)
 
 
 def _windowDisplay():

@@ -87,7 +87,12 @@ typing on, and a UI layer (TD's panes, menus, popups, mouse, clicks, keys) on to
   - Performance with 202 operators and 40 references: Live mode went from 35 to 60 fps. Reference lines are
     one strip each with a repeating dot texture (`refs` Script SOP, `refdots`) instead of ~25,000 dot ribbons,
     and cook on their own while pulses run; the reference scan runs every 30 frames or when operators change.
-  - Step 5 done. Next: step 6, export net3d.tox and net3d_standalone.tox like cam_nav.
+  - Step 5 done.
+- Step 6 done: `net3d.tox` (scripts synced to `scripts/net3d/`) and `net3d_standalone.tox` (embedded), both checked
+  in a fresh COMP. Export: fresh `build()`, wait until the templates are locked (timeline playing), remove cards and
+  snapshots, clear `nodes` and the template file paths, save; for `net3d.tox` save a copy whose 14 script DATs have
+  `file = scripts/net3d/<name>.py` and Sync to File on. The timeline was found paused several times in this
+  session (cause unknown, not `build()`); delayed `run()` calls only fire while it plays.
 - Still open:
   - Drawn tiles use a simpler model than TD 2025 (family border all round vs. TD's family column with flag
     icons and a grey frame; live viewers vs. type labels; current operator filled vs. outlined; COMPs flat grey).
