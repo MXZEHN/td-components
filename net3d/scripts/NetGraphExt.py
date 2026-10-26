@@ -150,6 +150,13 @@ class NetGraphExt:
         self._chain = set()      # that network and its ancestors: always scanned
         self._trans = None       # running dive / surface transition
         self._typed = {}         # annotation path -> typewriter state
+        # filled by _scan; defaults for the Script OPs that cook before it
+        self._index, self._ops = {}, []
+        self._cols, self._tile = dict(DEFAULT_COLORS), dict(DEFAULT_TILE)
+        self._scale, self._layer, self._maxLevel = 0.01, 8.0, 0
+        self._previews = 'all'
+        self._targetPath = None
+        self._hover = None
 
     # ---- helpers ---------------------------------------------------
 
@@ -1228,7 +1235,7 @@ class NetGraphExt:
         show = {'in': p.Hierlinks.eval(), 'out': p.Hierlinks.eval(), 'frame': p.Framelinks.eval()}
         poses, grow = self.Layout()
         scriptOp.clear()
-        scriptOp.primAttribs.create('Cd', (1.0, 1.0, 1.0, 1.0))
+        scriptOp.primAttribs.create('Cd')
 
         def end(e):
             ni, dx, dy = e[:3]

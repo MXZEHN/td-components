@@ -412,6 +412,12 @@ def build(parentComp, scriptsDir, name='net3d'):
     comp.par.ext0promote = True
     comp.par.ext1object = "op('./UILayerExt').module.UILayerExt(me)"
     comp.initializeExtensions()
+    # Script OPs cooked once while being created, before the extensions
+    # existed; drop those errors and cook them again
+    comp.clearScriptErrors(recurse=True)
+    for o in comp.children:
+        if o.OPType in ('scriptCHOP', 'scriptSOP'):
+            o.cook(force=True)
 
     # Target left empty = the network net3d sits in
     comp.ext.NetGraphExt.Rebuild()

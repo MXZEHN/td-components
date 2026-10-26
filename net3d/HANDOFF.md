@@ -16,7 +16,7 @@ typing on, and a UI layer (TD's panes, menus, popups, mouse, clicks, keys) on to
 ## Status (2026-10-26, TD 2025.33230, TDMCP 1.1.49)
 
 - Steps 1 to 3 done. Dev patch: `net3d/net3d_dev.toe` (git-ignored), made from a patch holding only TDMCP.
-- `build()` runs with zero operator errors.
+- `build()` runs with zero operator errors and zero script errors (check `scriptErrors(recurse=True)` too: `errors()` does not include them).
 - Fixed from step 3: Render TOP `bgcolora` (no `bgalpha`), `transparency` = `orderind`, `antialias` = `aa16`;
   Fit TOP `fit` = `fitbest`; Mouse In CHOP button channels must be named (`lbuttonname` etc.); Keyboard In DAT
   calls `onKey(dat, keyInfo)`; Screen Grab TOP `source` set to the display holding the TD window; grab crops
