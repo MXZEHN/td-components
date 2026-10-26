@@ -227,11 +227,19 @@ def _buildUILayer(comp, render):
     except NameError:
         # no Screen Grab TOP in this build: captured tiles and chrome stay empty
         grab = comp.create(constantTOP, 'grab')
+    _setparSafe(grab, 'source', _windowDisplay())
     grab.nodeX, grab.nodeY = 200, 450
     mouse = comp.create(mouseinCHOP, 'mouse')
+    # button channels are off unless named
+    _setparSafe(mouse, 'lbuttonname', 'lselect')
+    _setparSafe(mouse, 'mbuttonname', 'mselect')
+    _setparSafe(mouse, 'rbuttonname', 'rselect')
     mouse.nodeX, mouse.nodeY = 200, 600
     keys = comp.create(keyboardinDAT, 'keys')
     keys.par.callbacks = 'keys_cb'
+    auto = comp.op('keys_callbacks')
+    if auto is not None:
+        auto.destroy()
     keys.nodeX, keys.nodeY = 200, 750
     _table(comp, 'regions', REGIONS, -600, -100)
     _table(comp, 'popups', POPUPS, -600, -250)
@@ -259,7 +267,7 @@ def _buildUILayer(comp, render):
     rui.par.outputresolution = 'custom'
     rui.par.resolutionw.expr = 'parent().ext.UILayerExt.WindowSize()[0]'
     rui.par.resolutionh.expr = 'parent().ext.UILayerExt.WindowSize()[1]'
-    _setparSafe(rui, 'bgalpha', 0)
+    _setparSafe(rui, 'bgcolora', 0)
     rui.nodeX, rui.nodeY = 600, 300
     place = comp.create(transformTOP, 'world_place')
     place.inputConnectors[0].connect(render)
@@ -281,6 +289,20 @@ def _buildUILayer(comp, render):
     out = comp.create(outTOP, 'out1')
     out.inputConnectors[0].connect(over)
     out.nodeX, out.nodeY = 1000, 200
+
+
+def _windowDisplay():
+    """Screen Grab source for the display the TD window sits on: '1', '2', ...
+    (window titles change on every save, displays don't)."""
+    try:
+        cx, cy = ui.windowX + ui.windowWidth // 2, ui.windowY + ui.windowHeight // 2
+        for m in monitors:
+            if m.left <= cx <= m.right and m.bottom <= cy <= m.top:
+                digits = ''.join(ch for ch in str(m.displayName) if ch.isdigit())
+                return digits or '1'
+    except Exception:
+        pass
+    return '1'
 
 
 def _setparSafe(o, name, value):
@@ -375,8 +397,8 @@ def build(parentComp, scriptsDir, name='net3d'):
     render.par.resolutionh.expr = "parent().ext.UILayerExt.WorldRes()[1] if parent().par.Uilayer else parent().par.Res2"
     # order-independent transparency, so faded layers blend whatever the
     # camera angle; the parameter name differs between builds
-    for pn, v in (('antialias', 'aa16x'), ('bgalpha', 1),
-                  ('orderindtrans', True), ('transparency', 'orderindependent')):
+    for pn, v in (('antialias', 'aa16'), ('bgcolora', 1),
+                  ('transparency', 'orderind')):
         if hasattr(render.par, pn):
             try:
                 getattr(render.par, pn).val = v

@@ -1021,7 +1021,7 @@ class NetGraphExt:
                 sel.par.top = spec['path']
                 tex = geo.create(fitTOP, 'view')
                 tex.inputConnectors[0].connect(sel)
-                _setpar(tex, 'fit', 'best')
+                _setpar(tex, 'fit', 'fitbest')
                 sel.nodeX, sel.nodeY = -200, y
             elif part == 'view' and spec['src'] == 'op':
                 tex = geo.create(_OPVIEWER, 'view')
@@ -1044,8 +1044,11 @@ class NetGraphExt:
             for j, o_ in enumerate((tex, mat, g)):
                 o_.nodeX, o_.nodeY = j * 200, y
         if spec.get('face') is not None:
+            # wires can't cross COMPs: select the grab into this card first
+            grab = geo.create(selectTOP, 'grab')
+            grab.par.top = '../../grab'
             crop = geo.create(cropTOP, 'face_src')
-            crop.inputConnectors[0].connect(self.ownerComp.op('grab'))
+            crop.inputConnectors[0].connect(grab)
             cache = geo.create(cacheTOP, 'face')
             cache.inputConnectors[0].connect(crop)
             _setpar(cache, 'cachesize', 1)
@@ -1060,8 +1063,8 @@ class NetGraphExt:
             q.render = q.display = True
             g.par.material = 'face_mat'
             g.par.tz = 0.0008
-            for j, o_ in enumerate((crop, cache, mat, g)):
-                o_.nodeX, o_.nodeY = j * 200 - 200, 300
+            for j, o_ in enumerate((grab, crop, cache, mat, g)):
+                o_.nodeX, o_.nodeY = j * 200 - 400, 300
 
     def _styleCard(self, geo, spec, cols, tile):
         for part in ('view', 'name', 'face'):

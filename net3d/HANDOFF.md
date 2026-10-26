@@ -13,6 +13,21 @@ tutorials can be recorded as 3D visualisations: live while editing, with dives i
 typing on, and a UI layer (TD's panes, menus, popups, mouse, clicks, keys) on top. Read
 [README.md](README.md) for the component and [UI_LAYER.md](UI_LAYER.md) for the UI layer design.
 
+## Status (2026-10-26, TD 2025.33230, TDMCP 1.1.49)
+
+- Steps 1 to 3 done. Dev patch: `net3d/net3d_dev.toe` (git-ignored), made from a patch holding only TDMCP.
+- `build()` runs with zero operator errors.
+- Fixed from step 3: Render TOP `bgcolora` (no `bgalpha`), `transparency` = `orderind`, `antialias` = `aa16`;
+  Fit TOP `fit` = `fitbest`; Mouse In CHOP button channels must be named (`lbuttonname` etc.); Keyboard In DAT
+  calls `onKey(dat, keyInfo)`; Screen Grab TOP `source` set to the display holding the TD window; grab crops
+  inside cards go through a Select TOP (wires can't cross COMPs).
+- Confirmed as written: `opviewerTOP`/`opviewer`, crop/cache/transform/text/circle parameter names,
+  `instancer/g/b/a`, Camera `viewanglemethod` = `horzfov`, `ui.panes` attributes (`bottomLeft`/`topRight` are
+  `Coords` with pixels and UV), `ui.windowX/Y/Width/Height`, `monitors`, `currentChild`, `Par.isOP`, annotate
+  `Titletext`/`Bodytext`/`Backcolorr`.
+- Still open: Mouse In CHOP range on a three-monitor setup (`output` = `normal`), Screen Grab only sees TD when TD
+  is in front. Both belong to step 4 calibration, which needs the user at TD.
+
 ## Step 1: set up TouchDesigner (the original first task)
 
 1. Ask the user for the path of their existing patch that contains the **tdmcp** component. Don't guess.

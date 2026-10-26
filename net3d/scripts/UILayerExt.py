@@ -585,8 +585,12 @@ class UILayerExt:
         geo.nodeX, geo.nodeY = (cid % 10) * 150, -(cid // 10) * 120
         kind = e['kind']
         if kind == 'grab':
+            # wires can't cross COMPs: select the grab into this card first
+            src = geo.create(selectTOP, 'grab')
+            src.par.top = '../../grab'
+            src.nodeX = -200
             tex = geo.create(cropTOP, 'tex')
-            tex.inputConnectors[0].connect(self.ownerComp.op('grab'))
+            tex.inputConnectors[0].connect(src)
         elif kind == 'text':
             tex = geo.create(textTOP, 'tex')
         elif kind == 'ring':
