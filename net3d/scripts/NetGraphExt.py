@@ -934,6 +934,12 @@ class NetGraphExt:
         viewer quad and a name strip quad; the card follows the 'inst' /
         'notes' CHOPs by expression."""
         cards = self.ownerComp.op('cards')
+        # the card expressions index these CHOPs per node: cook them for the
+        # new node list first, or a new index is out of range until they do
+        for name in ('inst', 'notes', 'tiles'):
+            o = self.ownerComp.op(name)
+            if o is not None:
+                o.cook(force=True)
         cols = self._cols
         tile = self._tile
         s = self._scale

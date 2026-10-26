@@ -25,8 +25,18 @@ typing on, and a UI layer (TD's panes, menus, popups, mouse, clicks, keys) on to
   `instancer/g/b/a`, Camera `viewanglemethod` = `horzfov`, `ui.panes` attributes (`bottomLeft`/`topRight` are
   `Coords` with pixels and UV), `ui.windowX/Y/Width/Height`, `monitors`, `currentChild`, `Par.isOP`, annotate
   `Titletext`/`Bodytext`/`Backcolorr`.
-- Still open: Mouse In CHOP range on a three-monitor setup (`output` = `normal`), Screen Grab only sees TD when TD
-  is in front. Both belong to step 4 calibration, which needs the user at TD.
+- Step 4 partly done (1920x1080 maximised window, three monitors):
+  - Network mapping matches the real tiles to about 1 px at two zoom levels, with Network Offset 0 and Zoom
+    Scale 1. Two structural fixes did it: **Window Inset** (pane coordinates start 8 px inside the window, the
+    Windows frame) and `ViewRect()` (the view centre is the editor pane minus the 23 px path bar).
+  - Mouse In CHOP: `output` must be `normal` (the default `aspect` scales y by the width). Then -1..1 covers the
+    primary monitor and the window UV matches to 1 px. It only updates while TD has focus.
+  - Screen Grab numbers displays in `monitors` order, not by Windows name (`DISPLAY1` was Display 2 here).
+  - `regions` table measured: timeline and menu bar + toolbar.
+  - UI cards had no material (`./mat`, the MAT is inside the COMP); chrome now shows TD's pixels.
+  - Captured tile faces only record while the editor shows that network (`_editorOwner()`).
+- Still open: the `popups` table (needs the right-click menu, Tab menu and middle-click info opened once),
+  Tile Source = Drawn colours, mouse buttons and hover (needs real clicks), then step 5.
 
 ## Step 1: set up TouchDesigner (the original first task)
 

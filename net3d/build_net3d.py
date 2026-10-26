@@ -58,11 +58,13 @@ COLORS = [
 ]
 
 # Window regions TD does not report as panes, in window UV (origin bottom
-# left). Rough defaults; calibrate with UI Debug against the grab.
+# left). Measured on a maximised 1920x1080 window (Windows 10, TD 2025.33230):
+# timeline 1002-1072 px from the top, menu bar + toolbar 32-79 px, 8 px frame.
+# Calibrate with the Calibration Overlay against the grab on other layouts.
 REGIONS = [
     ('name', 'u0', 'v0', 'u1', 'v1', 'trigger'),
-    ('timeline', 0.0, 0.0, 1.0, 0.045, 'time'),
-    ('menubar', 0.0, 0.97, 1.0, 1.0, 'always'),
+    ('timeline', 0.0042, 0.0074, 0.9958, 0.0722, 'time'),
+    ('menubar', 0.0042, 0.9269, 0.9958, 0.9704, 'always'),
 ]
 
 # Popups opened over the editor: pixels, anchor = top-left corner relative
@@ -186,7 +188,7 @@ def _customPars(comp):
                              ('Uidebug', 'Calibration Overlay', False)):
         p = page.appendToggle(name, label=label)[0]; p.default = p.val = val
     p = page.appendFloat('Cursorsize', label='Cursor Size')[0]; p.default = p.val = 7; p.normMax = 30
-    p = page.appendFloat('Pathbarheight', label='Path Bar Height')[0]; p.default = p.val = 28; p.normMax = 60
+    p = page.appendFloat('Pathbarheight', label='Path Bar Height')[0]; p.default = p.val = 23; p.normMax = 60
     page.appendXYZ('Uitranslate', label='UI Translate')
     page.appendXYZ('Uirotate', label='UI Rotate')
     p = page.appendFloat('Uiscale', label='UI Scale')[0]; p.default = p.val = 1
@@ -195,6 +197,10 @@ def _customPars(comp):
     p = page.appendXY('Mousecalscale', label='Mouse Scale')
     for par_ in p:
         par_.default = par_.val = 1
+    # pane coordinates start inside the OS window frame (8 px on Windows 10/11)
+    p = page.appendXY('Windowinset', label='Window Inset (px)')
+    for par_ in p:
+        par_.default = par_.val = 8
     p = page.appendXY('Netcaloffset', label='Network Offset')
     p = page.appendFloat('Netcalscale', label='Network Zoom Scale')[0]; p.default = p.val = 1
 
@@ -230,6 +236,9 @@ def _buildUILayer(comp, render):
     _setparSafe(grab, 'source', _windowDisplay())
     grab.nodeX, grab.nodeY = 200, 450
     mouse = comp.create(mouseinCHOP, 'mouse')
+    # -1..1 over the primary monitor on both axes (the default 'aspect'
+    # scales y by the width)
+    _setparSafe(mouse, 'output', 'normal')
     # button channels are off unless named
     _setparSafe(mouse, 'lbuttonname', 'lselect')
     _setparSafe(mouse, 'mbuttonname', 'mselect')
@@ -293,13 +302,14 @@ def _buildUILayer(comp, render):
 
 def _windowDisplay():
     """Screen Grab source for the display the TD window sits on: '1', '2', ...
-    (window titles change on every save, displays don't)."""
+    (window titles change on every save, displays don't). The Screen Grab
+    numbers displays in the order of the monitors list, not by their
+    Windows name (DISPLAY1 can be Display 2)."""
     try:
         cx, cy = ui.windowX + ui.windowWidth // 2, ui.windowY + ui.windowHeight // 2
-        for m in monitors:
+        for i, m in enumerate(monitors):
             if m.left <= cx <= m.right and m.bottom <= cy <= m.top:
-                digits = ''.join(ch for ch in str(m.displayName) if ch.isdigit())
-                return digits or '1'
+                return str(i + 1)
     except Exception:
         pass
     return '1'

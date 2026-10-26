@@ -106,10 +106,13 @@ class UILayerExt:
             x1, y1 = (tr.x, tr.y) if hasattr(tr, 'x') else (tr[0], tr[1])
         except Exception:
             return None
+        # pane corners count from the window's client area, which starts
+        # Window Inset pixels inside the window (the OS frame)
+        w, h = self.WindowSize()
+        ix, iy = self.ownerComp.par.Windowinsetx.eval(), self.ownerComp.par.Windowinsety.eval()
         if max(abs(x1), abs(y1)) > 1.5:
-            w, h = self.WindowSize()
             x0, x1, y0, y1 = x0 / w, x1 / w, y0 / h, y1 / h
-        return (x0, y0, x1, y1)
+        return (x0 + ix / w, y0 + iy / h, x1 + ix / w, y1 + iy / h)
 
     def _panes(self):
         try:
@@ -130,11 +133,19 @@ class UILayerExt:
         pane = self._editorPane()
         return self._paneRect(pane) if pane is not None else None
 
+    def ViewRect(self):
+        """The editor pane without its path bar: the area that shows the
+        network, whose centre is the editor's view centre."""
+        rect = self.EditorRect()
+        if rect is None:
+            return None
+        return (rect[0], rect[1], rect[2], rect[3] - self.ownerComp.par.Pathbarheight.eval() / self.WindowSize()[1])
+
     def NetToWindow(self, nx, ny):
         """Network-editor coordinates of the editor's current network ->
         window UV, from the editor's view centre (x, y) and zoom (pixels per
         network unit), plus the Net Calibration parameters."""
-        pane, rect = self._editorPane(), self.EditorRect()
+        pane, rect = self._editorPane(), self.ViewRect()
         if pane is None or rect is None:
             return None
         p = self.ownerComp.par
@@ -145,7 +156,7 @@ class UILayerExt:
                 vc + (ny - getattr(pane, 'y', 0.0)) * zoom / h + p.Netcaloffsety.eval())
 
     def WindowToNet(self, u, v):
-        pane, rect = self._editorPane(), self.EditorRect()
+        pane, rect = self._editorPane(), self.ViewRect()
         if pane is None or rect is None:
             return None
         p = self.ownerComp.par
@@ -160,9 +171,10 @@ class UILayerExt:
 
     def WorldRect(self):
         """Where the 3D render goes in the window: the network editor's
-        rectangle with Chrome 'editor', the whole window otherwise."""
+        view (below the path bar) with Chrome 'editor', the whole window
+        otherwise."""
         if self.ownerComp.par.Chrome.eval() == 'editor':
-            r = self.EditorRect()
+            r = self.ViewRect()
             if r is not None:
                 return r
         return (0.0, 0.0, 1.0, 1.0)
@@ -177,7 +189,7 @@ class UILayerExt:
         network editor shows it: same centre, same zoom. Straight on, the
         3D layer then lines up pixel for pixel with TD's editor."""
         g = self.ownerComp.ext.NetGraphExt
-        rect, net = self.EditorRect(), g._ownerPath or getattr(g, '_targetPath', None)
+        rect, net = self.ViewRect(), g._ownerPath or getattr(g, '_targetPath', None)
         if rect is None or net not in g.Networks:
             return None
         centre = self.WindowToNet((rect[0] + rect[2]) * 0.5, (rect[1] + rect[3]) * 0.5)
@@ -603,7 +615,8 @@ class UILayerExt:
         q = geo.create(selectSOP, 'quad')
         q.par.sop = '../../quad'
         q.render = q.display = True
-        geo.par.material = mat.name
+        # a bare name would look for a sibling of the COMP; the MAT is inside
+        geo.par.material = './' + mat.name
 
     def _style(self, geo, e, w, h):
         tex = geo.op('tex')
@@ -677,7 +690,9 @@ class UILayerExt:
         (got: the captured face is shown instead of the drawn one)."""
         g = self.ownerComp.ext.NetGraphExt
         rect = self.EditorRect()
-        owner = g._ownerPath or getattr(g, '_targetPath', None)
+        # only the network the editor really shows is on screen; net3d's own
+        # owner path stays put while the editor is somewhere net3d ignores
+        owner = g._editorOwner()
         got = getattr(self, '_got', set())
         chans = {k: [] for k in ('l', 'r', 'b', 't', 'vis', 'got')}
         for n in g.Nodes:
