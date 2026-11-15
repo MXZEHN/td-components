@@ -5,3 +5,4 @@ CrashAutoSave*
 .claude/
 __pycache__/
 *.pyc
+show-network/diagnose-*.txt
