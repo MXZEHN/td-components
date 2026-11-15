@@ -158,4 +158,5 @@ if (-not $SharePath) {
 }
 
 Write-Host ""
-Write-Host "Done. Next: run setup on the other laptop, then run diagnose.ps1 -Role $Role on both." -ForegroundColor White
+if (-not $SharePath) { Write-Host "NOTE: no file share was set up and no password asked. To share a folder, run again with -SharePath D:\ShowData" -ForegroundColor Yellow }
+Write-Host "Done. Next: run setup on the other laptop, then diagnose.ps1 on both (-Role A on laptop A, -Role B on laptop B)." -ForegroundColor White
