@@ -139,13 +139,16 @@ if (-not $SharePath) {
     Ok "Skipped (no -SharePath given)"
 } else {
     if (-not (Test-Path $SharePath)) { New-Item -ItemType Directory -Path $SharePath | Out-Null }
+    # Always ask, so the password is guaranteed to match the other laptop
+    $pw = Read-Host -AsSecureString "Password for local user '$ShareUser' (type the SAME password on both laptops)"
     if (-not (Get-LocalUser -Name $ShareUser -ErrorAction SilentlyContinue)) {
-        $pw = Read-Host -AsSecureString "Choose a password for local user '$ShareUser' (use the SAME on both laptops)"
         New-LocalUser -Name $ShareUser -Password $pw -PasswordNeverExpires -AccountNeverExpires `
             -Description 'Show network file sharing' | Out-Null
         Ok "Local user '$ShareUser' created"
     } else {
-        Ok "Local user '$ShareUser' already exists"
+        Set-LocalUser -Name $ShareUser -Password $pw -PasswordNeverExpires $true
+        Enable-LocalUser -Name $ShareUser
+        Ok "Local user '$ShareUser' already existed - password updated"
     }
     if (-not (Get-SmbShare -Name $ShareName -ErrorAction SilentlyContinue)) {
         New-SmbShare -Name $ShareName -Path $SharePath -FullAccess $ShareUser | Out-Null

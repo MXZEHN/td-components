@@ -75,7 +75,8 @@ powershell -ExecutionPolicy Bypass -File .\setup-laptop.ps1 -Role A -SharePath D
 powershell -ExecutionPolicy Bypass -File .\setup-laptop.ps1 -Role B -SharePath D:\ShowData
 ```
 
-- When it asks for a password for user `show`, type the shared password from step 0.
+- It **always** asks for the password of user `show`. Type the shared password from step 0 on **both** laptops. It isn't a fixed password; you choose it, and it must be identical on A and B.
+- No password question? You forgot `-SharePath ...`, so the share step was skipped. Run the command again with it.
 - Every line should be green `OK` or yellow `WARN`. A red message stops the script and tells you what to do.
 - If it says *"More than one wired adapter is up"*, add `-Adapter "<Name>"` using the name it lists.
 
